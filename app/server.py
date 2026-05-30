@@ -279,6 +279,17 @@ async def image_prompt(session_id: str, style: str = "anime portrait", user: dic
     return {"ok": True, "prompt": prompt}
 
 
+@app.post("/api/sessions/{session_id}/image")
+async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    from .oc_image_gen import generate_character_image
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    style = body.get("style", "anime portrait")
+    result = await generate_character_image(draft, style)
+    return result
+
+
 @app.get("/api/sessions/{session_id}/voice-profile")
 async def voice_profile(session_id: str, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_voice_gen import match_voice_profile, generate_character_voice
