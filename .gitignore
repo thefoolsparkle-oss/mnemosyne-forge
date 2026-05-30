@@ -1,0 +1,23 @@
+# Sensitive config (API keys, paths)
+config.yaml
+.env
+
+# Runtime data
+data/
+exports/*.json
+exports/*.md
+!exports/.gitkeep
+tunnel.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

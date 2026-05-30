@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>造枝 Mnemosyne Forge</title>
+<link rel="stylesheet" href="/web/style.css">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- Header -->
+  <header id="header">
+    <div class="header-left">
+      <h1 class="app-title">造枝</h1>
+      <span class="app-subtitle">Mnemosyne Forge</span>
+    </div>
+    <div class="header-right">
+      <button id="btn-back-dash" class="btn-header hidden">← 返回</button>
+      <span id="user-status" class="user-status"></span>
+      <button id="btn-login" class="btn-header">登录</button>
+      <button id="btn-library" class="btn-header">角色库</button>
+      <button id="btn-new-session" class="btn-header">新建角色</button>
+    </div>
+  </header>
+
+  <!-- Dashboard (main screen after login) -->
+  <main id="dashboard" class="hidden">
+    <div class="dash-hero">
+      <div class="dash-logo">造</div>
+      <h2 class="dash-title">造枝</h2>
+      <p class="dash-subtitle">Mnemosyne Forge · AI 原创角色创作工坊</p>
+      <div class="dash-divider"></div>
+      <p class="dash-desc">输入一个模糊的灵感，AI 帮你一步步打磨成完整的角色设定，<br>最终导出为标准角色卡。</p>
+      <button id="btn-dash-new" class="btn-dash-new">＋ 创建新角色</button>
+    </div>
+  </main>
+
+  <!-- Welcome screen (no session) -->
+  <main id="welcome-screen" class="hidden">
+    <div class="welcome-card">
+      <h2 class="welcome-title">AI 原创角色创作助手</h2>
+      <p class="welcome-desc">输入你的角色灵感，让我帮你一步步完善设定。</p>
+      <div class="welcome-examples">
+        <span class="example-tag" data-idea="一个被神抛弃后生活在现代都市的冷淡女性">被神抛弃的冷淡女性</span>
+        <span class="example-tag" data-idea="一个表面开朗但内心孤独的少年剑士">表面开朗的少年剑士</span>
+        <span class="example-tag" data-idea="一个活了三百年的吸血鬼侦探">活了三百年的侦探</span>
+      </div>
+      <div class="welcome-input-area">
+        <textarea id="initial-idea" placeholder="描述你的角色灵感……" rows="3"></textarea>
+        <div class="welcome-buttons">
+          <button id="btn-start" class="btn-primary">开始创作 · 逐步引导</button>
+          <button id="btn-fast" class="btn-fast">⚡ 一键生成角色卡</button>
+          <span class="fast-hint">跳过对话，直接出完整卡片</span>
+        </div>
+      </div>
+      <p id="welcome-error" class="error-msg hidden"></p>
+    </div>
+  </main>
+
+  <!-- Chat + Draft panels (session active) -->
+  <main id="workspace" class="hidden">
+    <div id="chat-panel">
+      <div id="chat-messages"></div>
+      <div id="chat-input-area">
+        <textarea id="chat-input" placeholder="输入你的想法，Shift+Enter 换行……" rows="2"></textarea>
+        <button id="btn-send" class="btn-send" title="发送 (Enter)">发送</button>
+        <button id="btn-search" class="btn-search" title="搜索素材">搜索素材</button>
+      </div>
+    </div>
+
+    <aside id="draft-panel">
+      <h3 class="draft-title">角色草稿</h3>
+      <div id="draft-content">
+        <div class="draft-field" data-field="name">
+          <span class="field-label">名字</span>
+          <span class="field-value empty">待定</span>
+        </div>
+        <div class="draft-field" data-field="core_concept">
+          <span class="field-label">核心概念</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="personality">
+          <span class="field-label">性格</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="appearance">
+          <span class="field-label">外貌</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="background">
+          <span class="field-label">背景</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="abilities">
+          <span class="field-label">能力特长</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="weaknesses">
+          <span class="field-label">弱点缺陷</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="relationships">
+          <span class="field-label">人际关系</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="speaking_style">
+          <span class="field-label">说话方式</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="scenario">
+          <span class="field-label">使用场景</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+        <div class="draft-field" data-field="first_message">
+          <span class="field-label">开场白</span>
+          <span class="field-value empty">待补充</span>
+        </div>
+
+        <div class="draft-progress">
+          <div class="progress-label">
+            <span id="completion-detail">核心字段 0/5</span>
+            <span id="completion-percent">0%</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <div class="draft-stage">
+          <span class="stage-label">当前阶段</span>
+          <span id="current-stage" class="stage-value">核心概念</span>
+        </div>
+      </div>
+
+      <button id="btn-export" class="btn-export">导出角色卡 V2</button>
+      <p id="export-status" class="export-status hidden"></p>
+    </aside>
+  </main>
+
+  <!-- Toast notifications -->
+  <div id="toast" class="toast hidden"></div>
+
+  <!-- Card Preview Overlay -->
+  <div id="card-overlay" class="card-overlay hidden">
+    <div class="card-preview">
+      <button id="btn-close-card" class="btn-close-card">&times;</button>
+      <div class="card-header">
+        <div class="card-avatar"></div>
+        <h2 id="card-name" class="card-name">角色名</h2>
+        <div id="card-tags" class="card-tags"></div>
+      </div>
+      <div class="card-body">
+        <div class="card-section">
+          <h4>设定描述</h4>
+          <p id="card-description"></p>
+        </div>
+        <div class="card-section">
+          <h4>性格</h4>
+          <p id="card-personality"></p>
+        </div>
+        <div class="card-section">
+          <h4>场景</h4>
+          <p id="card-scenario"></p>
+        </div>
+        <div class="card-section">
+          <h4>开场白</h4>
+          <p id="card-first-mes" class="card-quote"></p>
+        </div>
+        <div class="card-section">
+          <h4>示例对话</h4>
+          <p id="card-mes-example" class="card-quote"></p>
+        </div>
+        <div class="card-section" id="card-greetings-section">
+          <h4>备选开场白</h4>
+          <div id="card-greetings"></div>
+        </div>
+        <div class="card-section" id="card-notes-section">
+          <h4>创作者备注</h4>
+          <p id="card-creator-notes"></p>
+        </div>
+      </div>
+      <div class="card-actions">
+        <button id="btn-download-v2" class="btn-download">下载 Character Card V2</button>
+        <button id="btn-back-chat" class="btn-back">返回对话</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Library Overlay -->
+  <div id="library-overlay" class="library-overlay hidden">
+    <div class="library-panel">
+      <div class="library-header">
+        <h3>角色库</h3>
+        <button id="btn-close-library" class="btn-close-card">&times;</button>
+      </div>
+      <div id="library-list" class="library-list"></div>
+    </div>
+  </div>
+
+  <!-- Auth Modal -->
+  <div id="auth-overlay" class="auth-overlay hidden">
+    <div class="auth-card">
+      <button id="btn-close-auth" class="btn-close-card">&times;</button>
+      <h3 id="auth-title">登录</h3>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login">登录</button>
+        <button class="auth-tab" data-tab="register">注册</button>
+        <button class="auth-tab" data-tab="guest">游客</button>
+      </div>
+      <div class="auth-form" id="auth-form-login">
+        <input type="text" id="login-username" placeholder="用户名" autocomplete="username">
+        <div class="pw-wrap">
+          <input type="password" id="login-password" placeholder="密码" autocomplete="current-password">
+          <button type="button" class="pw-toggle" data-target="login-password">👁</button>
+        </div>
+        <button id="btn-login-submit" class="btn-primary">登录</button>
+        <p class="auth-hint">使用忆界树的账号即可登录</p>
+      </div>
+      <div class="auth-form hidden" id="auth-form-register">
+        <input type="text" id="reg-username" placeholder="用户名（至少3个字符）" autocomplete="username">
+        <input type="text" id="reg-nickname" placeholder="昵称（选填）">
+        <div class="pw-wrap">
+          <input type="password" id="reg-password" placeholder="密码（至少8个字符）" autocomplete="new-password">
+          <button type="button" class="pw-toggle" data-target="reg-password">👁</button>
+        </div>
+        <button id="btn-register-submit" class="btn-primary">注册</button>
+      </div>
+      <div class="auth-form hidden" id="auth-form-guest">
+        <p class="auth-guest-desc">以游客身份使用，无需注册。<br>数据保留3天。</p>
+        <button id="btn-guest-submit" class="btn-primary">进入游客模式</button>
+      </div>
+      <p id="auth-error" class="error-msg hidden"></p>
+    </div>
+  </div>
+
+  <!-- Search Overlay -->
+  <div id="search-overlay" class="search-overlay hidden">
+    <div class="search-panel">
+      <div class="search-panel-header">
+        <h3>搜索素材灵感</h3>
+        <button id="btn-search-close" class="btn-close-card">&times;</button>
+      </div>
+      <div class="search-input-row">
+        <input type="text" id="search-input" placeholder="输入搜索方向，如：日本战国剑术流派、哥特建筑风格……">
+        <button id="btn-search-go" class="btn-search-go">搜索</button>
+      </div>
+      <div class="search-body">
+        <div id="search-result" class="search-result"></div>
+        <div id="search-history" class="search-history"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/web/app.js"></script>
+</body>
+</html>
