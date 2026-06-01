@@ -125,3 +125,50 @@ class SearchResponse(BaseModel):
     inspiration: InspirationCard | None = None
     results: list[SearchResult] = Field(default_factory=list)
     error: str | None = None
+
+
+# ─── Image models ──────────────────────────────────────
+
+
+class ImagePromptRequest(BaseModel):
+    style: str = "anime portrait"
+    aspect_ratio: str = "1:1"
+    detail_level: str = "medium"
+    include_background: bool = True
+
+
+class ImagePromptResult(BaseModel):
+    positive_prompt: str
+    negative_prompt: str = ""
+    style_notes: str = ""
+    missing_visual_fields: list[str] = Field(default_factory=list)
+    recommended_aspect_ratio: str = "1:1"
+
+
+class GeneratedImageAsset(BaseModel):
+    session_id: str
+    provider: str
+    prompt: str
+    negative_prompt: str | None = None
+    image_path: str | None = None
+    seed: int | None = None
+    width: int | None = None
+    height: int | None = None
+    created_at: str = ""
+
+
+# ─── Voice models ──────────────────────────────────────
+
+
+class VoiceProfile(BaseModel):
+    template_id: str
+    display_name: str
+    gender_tone: str | None = None
+    age_tone: str | None = None
+    timbre: str = ""
+    pitch: str = ""
+    speed: str = ""
+    emotion: str = ""
+    speaking_style: str = ""
+    sample_text: str = ""
+    provider_params: dict = Field(default_factory=dict)

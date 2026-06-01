@@ -90,6 +90,8 @@ async def generate_character_image(
         return {"ok": False, "error": "Stability API Key 未配置，请设置 STABILITY_API_KEY 环境变量", "prompt": prompt}
 
     # Build prompt
+    if not draft.appearance:
+        return {"ok": False, "error": "角色外貌信息不足，请先在草稿中补充外貌描述（发色、瞳色、服装、气质等）"}
     prompt = await build_image_prompt(draft, style)
     if not prompt:
         return {"ok": False, "error": "角色外貌信息不足，无法生成图片"}
@@ -98,23 +100,25 @@ async def generate_character_image(
 
     # Call Stability AI
     try:
-        model = img_cfg.get("model", "stable-diffusion-xl-1024-v1-0")
-        url = f"https://api.stability.ai/v1/generation/{model}/text-to-image"
+        model = img_cfg.get("model", "sd3.5-large")
+        url = "https://api.stability.ai/v2beta/stable-image/generate/core"
+
+        fields = {
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "output_format": "png",
+            "aspect_ratio": img_cfg.get("aspect_ratio", "1:1"),
+            "model": model,
+        }
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
                 url,
-                headers={"Authorization": f"Bearer {api_key}"},
-                data={
-                    "text_prompts[0][text]": prompt,
-                    "text_prompts[0][weight]": "1",
-                    "text_prompts[1][text]": negative_prompt,
-                    "text_prompts[1][weight]": "-1",
-                    "cfg_scale": str(img_cfg.get("cfg_scale", 7)),
-                    "steps": str(img_cfg.get("steps", 30)),
-                    "samples": "1",
-                    "style_preset": img_cfg.get("style_preset", "anime"),
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "application/json",
                 },
+                files={k: (None, v) for k, v in fields.items()},
             )
 
         if resp.status_code == 401 or resp.status_code == 403:
@@ -123,16 +127,17 @@ async def generate_character_image(
             return {"ok": False, "error": f"Stability API 返回错误 {resp.status_code}", "prompt": prompt}
 
         data = resp.json()
-        artifacts = data.get("artifacts", [])
-        if not artifacts:
+        image_b64 = data.get("image", "")
+        if not image_b64:
             return {"ok": False, "error": "API 未返回图片", "prompt": prompt}
 
         # Save image
         output_dir = get_project_root() / "exports" / "images"
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        image_data = base64.b64decode(artifacts[0]["base64"])
-        filename = f"{draft.name or 'character'}_{artifacts[0].get('seed', 0)}.png"
+        image_data = base64.b64decode(image_b64)
+        seed = data.get("seed", 0)
+        filename = f"{draft.name or 'character'}_{seed}.png"
         image_path = output_dir / filename
         image_path.write_bytes(image_data)
 
@@ -141,8 +146,8 @@ async def generate_character_image(
             "image_path": str(image_path),
             "prompt": prompt,
             "negative_prompt": negative_prompt,
-            "seed": artifacts[0].get("seed"),
-            "finish_reason": artifacts[0].get("finishReason"),
+            "seed": seed,
+            "finish_reason": data.get("finish_reason"),
         }
 
     except Exception as e:

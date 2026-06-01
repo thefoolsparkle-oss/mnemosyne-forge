@@ -72,6 +72,37 @@ def init_db() -> None:
                 created_at TEXT NOT NULL,
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
             );
+
+            CREATE TABLE IF NOT EXISTS voice_profiles (
+                session_id TEXT PRIMARY KEY,
+                voice_profile_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS voice_generations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                sample_text TEXT NOT NULL,
+                voice_profile_json TEXT NOT NULL,
+                audio_path TEXT,
+                status TEXT NOT NULL DEFAULT 'success',
+                error_message TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS voice_references (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                audio_path TEXT NOT NULL,
+                transcript TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                provider TEXT NOT NULL DEFAULT 'fish_audio',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            );
         """)
         # Migration: add user_id if missing
         cols = [row["name"] for row in conn.execute("PRAGMA table_info(sessions)").fetchall()]
@@ -103,6 +134,22 @@ def get_session(session_id: str) -> dict | None:
         d = dict(row)
         d["draft"] = OCDraft.model_validate_json(d.pop("draft_json"))
         return d
+    finally:
+        conn.close()
+
+
+def session_belongs_to_user(session_id: str, user_id: int, is_admin: bool = False) -> bool:
+    """Return whether the session is visible to this user."""
+    conn = _get_conn()
+    try:
+        if is_admin:
+            row = conn.execute("SELECT 1 FROM sessions WHERE id = ?", (session_id,)).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ? AND user_id = ?",
+                (session_id, user_id),
+            ).fetchone()
+        return row is not None
     finally:
         conn.close()
 
@@ -180,6 +227,9 @@ def delete_session(session_id: str) -> bool:
     conn = _get_conn()
     try:
         conn.execute("DELETE FROM search_runs WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM voice_generations WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM voice_references WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM voice_profiles WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM messages WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM exports WHERE session_id = ?", (session_id,))
         cursor = conn.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
@@ -231,6 +281,90 @@ def get_search_runs(session_id: str) -> list[dict]:
             "SELECT * FROM search_runs WHERE session_id = ? ORDER BY id DESC",
             (session_id,),
         ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def save_voice_profile(session_id: str, voice_profile_json: str) -> None:
+    now = datetime.now(timezone.utc).isoformat()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO voice_profiles (session_id, voice_profile_json, updated_at) VALUES (?, ?, ?)",
+            (session_id, voice_profile_json, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_voice_profile(session_id: str) -> dict | None:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT voice_profile_json FROM voice_profiles WHERE session_id = ?", (session_id,)
+        ).fetchone()
+        if row:
+            import json
+            return json.loads(row["voice_profile_json"])
+        return None
+    finally:
+        conn.close()
+
+
+def insert_voice_generation(session_id: str, provider: str, sample_text: str, voice_profile_json: str, audio_path: str | None = None, status: str = "success", error_message: str | None = None) -> None:
+    created_at = datetime.now(timezone.utc).isoformat()
+    conn = _get_conn()
+    try:
+        conn.execute(
+            "INSERT INTO voice_generations (session_id, provider, sample_text, voice_profile_json, audio_path, status, error_message, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (session_id, provider, sample_text, voice_profile_json, audio_path, status, error_message, created_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_voice_generations(session_id: str) -> list[dict]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM voice_generations WHERE session_id = ? ORDER BY id DESC",
+            (session_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def insert_voice_reference(session_id: str, audio_path: str, transcript: str, label: str = "", provider: str = "fish_audio") -> int:
+    created_at = datetime.now(timezone.utc).isoformat()
+    conn = _get_conn()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO voice_references (session_id, audio_path, transcript, label, provider, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (session_id, audio_path, transcript, label, provider, created_at),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def get_voice_references(session_id: str, provider: str | None = None) -> list[dict]:
+    conn = _get_conn()
+    try:
+        if provider:
+            rows = conn.execute(
+                "SELECT * FROM voice_references WHERE session_id = ? AND provider = ? ORDER BY id DESC",
+                (session_id, provider),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM voice_references WHERE session_id = ? ORDER BY id DESC",
+                (session_id,),
+            ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()

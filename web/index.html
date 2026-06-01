@@ -135,6 +135,12 @@
       </div>
 
       <button id="btn-export" class="btn-export">导出角色卡 V2</button>
+      <div class="draft-actions">
+        <button id="btn-world" class="btn-draft-action">生成世界观</button>
+        <button id="btn-image" class="btn-draft-action">生成立绘</button>
+        <button id="btn-voice" class="btn-draft-action">匹配声音</button>
+        <button id="btn-bridge" class="btn-draft-action">导入忆界树</button>
+      </div>
       <p id="export-status" class="export-status hidden"></p>
     </aside>
   </main>
@@ -249,6 +255,29 @@
       <div class="search-body">
         <div id="search-result" class="search-result"></div>
         <div id="search-history" class="search-history"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Voice Panel -->
+  <div id="voice-overlay" class="voice-overlay hidden">
+    <div class="voice-panel">
+      <div class="voice-panel-header">
+        <h3>角色声音</h3>
+        <button id="btn-voice-close" class="btn-close-card">&times;</button>
+      </div>
+      <div class="voice-panel-buttons">
+        <button id="btn-voice-analyze" class="btn-search-go">分析声线</button>
+        <button id="btn-voice-cast" class="btn-draft-action">匹配音色</button>
+        <button id="btn-voice-generate" class="btn-draft-action">生成试听</button>
+      </div>
+      <div class="voice-reference-upload">
+        <input id="voice-ref-file" type="file" accept="audio/*">
+        <textarea id="voice-ref-transcript" rows="2" placeholder="参考音频逐字稿，必须和音频内容一致"></textarea>
+        <button id="btn-voice-ref-upload" class="btn-draft-action">绑定参考音频</button>
+      </div>
+      <div id="voice-content" class="voice-content">
+        <div class="voice-loading">点击"分析声线"开始</div>
       </div>
     </div>
   </div>

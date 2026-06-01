@@ -663,6 +663,298 @@
   // Export
   btnExport.addEventListener('click', exportCard);
 
+  // Draft panel action buttons
+  $('#btn-world').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    try {
+      showToast('正在生成世界观……', 'success');
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/world');
+      if (data.ok) showToast('世界观已生成', 'success');
+    } catch(e) { showToast(e.message, 'error'); }
+  });
+
+  $('#btn-image').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    showToast('正在生成立绘……', 'success');
+    try {
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image', {});
+      if (data.ok) {
+        showToast('立绘已生成', 'success');
+        // Show prompt + copy button in a toast-like notification
+        var msg = 'Prompt:\n' + (data.prompt || '') + '\n\n点击确认复制到剪贴板';
+        if (confirm(msg)) {
+          navigator.clipboard.writeText(data.prompt || '').catch(function(){});
+        }
+      }
+      else showToast(data.error || '生图失败', 'error');
+    } catch(e) { showToast(e.message, 'error'); }
+  });
+
+  $('#btn-bridge').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    try {
+      showToast('正在导入忆界树……', 'success');
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/import-to-mnemosyne', {});
+      if (data.ok) {
+        showToast(data.message || '已导入忆界树', 'success');
+      } else {
+        showToast(data.error || '导入失败', 'error');
+      }
+    } catch(e) {
+      showToast(e.message, 'error');
+    }
+  });
+
+  // Voice panel
+  var voiceOverlay = $('#voice-overlay');
+  var voiceContent = $('#voice-content');
+  var voiceOptions = null;
+
+  $('#btn-voice').addEventListener('click', function() {
+    voiceOverlay.classList.remove('hidden');
+    loadVoiceOptions();
+  });
+  $('#btn-voice-close').addEventListener('click', function() {
+    voiceOverlay.classList.add('hidden');
+  });
+  voiceOverlay.addEventListener('click', function(e) {
+    if (e.target === voiceOverlay) voiceOverlay.classList.add('hidden');
+  });
+
+  $('#btn-voice-analyze').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    voiceContent.innerHTML = '<div class="voice-loading">分析中……</div>';
+    try {
+      if (!voiceOptions) await loadVoiceOptions();
+      var data = await apiCall('GET', '/api/sessions/' + state.sessionId + '/voice-profile');
+      renderVoiceProfile(data.voice_profile);
+    } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + e.message + '</div>'; }
+  });
+
+  $('#btn-voice-generate').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    try {
+      var providerEl = document.getElementById('voice-provider-select');
+      var refEl = document.getElementById('voice-edit-ref');
+      var provider = providerEl ? providerEl.value : ((voiceOptions && voiceOptions.default_provider) || 'edge_tts');
+      var refId = refEl ? refEl.value.trim() : '';
+      var prefixEl = document.getElementById('voice-fish-prefix');
+      var speedEl = document.getElementById('voice-fish-speed');
+      var volumeEl = document.getElementById('voice-fish-volume');
+      var body = { provider: provider };
+      body.provider_hints = {};
+      if (refId) body.provider_hints.fish_reference_id = refId;
+      body.fish_tts_directive = {
+        text_prefix: prefixEl ? prefixEl.value.trim() : '',
+        prosody: {
+          speed: speedEl ? Number(speedEl.value) : 0.9,
+          volume: volumeEl ? Number(volumeEl.value) : -3,
+        },
+      };
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample', body);
+      if (data.ok) {
+        var player = voiceContent.querySelector('.voice-sample-player');
+        if (player) {
+          player.innerHTML = '<audio controls src="' + (data.audio_url || data.audio_path) + '"></audio>';
+        }
+        showToast('试听已生成', 'success');
+      } else {
+        showToast(data.error || '生成失败', 'error');
+      }
+    } catch(e) { showToast(e.message, 'error'); }
+  });
+
+  $('#btn-voice-cast').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    try {
+      voiceContent.innerHTML = '<div class="voice-loading">正在匹配 Fish 音色底座……</div>';
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-cast', { limit: 8 });
+      if (data.voice_profile) {
+        renderVoiceProfile(data.voice_profile);
+      }
+      renderVoiceCastResult(data);
+      if (data.recommendation) {
+        showToast('已锁定音色: ' + data.recommendation.title, 'success');
+      } else {
+        showToast(data.warning || '没有找到高可信中文音色底座', 'error');
+      }
+    } catch(e) {
+      voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + e.message + '</div>';
+    }
+  });
+
+  $('#btn-voice-ref-upload').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    var fileInput = document.getElementById('voice-ref-file');
+    var transcriptInput = document.getElementById('voice-ref-transcript');
+    if (!fileInput.files || !fileInput.files[0]) {
+      showToast('请选择一段中文参考音频', 'error');
+      return;
+    }
+    var transcript = transcriptInput.value.trim();
+    if (!transcript) {
+      showToast('请填写参考音频逐字稿', 'error');
+      return;
+    }
+    var form = new FormData();
+    form.append('file', fileInput.files[0]);
+    form.append('transcript', transcript);
+    form.append('label', '角色中文参考音频');
+    try {
+      var resp = await fetch('/api/sessions/' + state.sessionId + '/voice-reference', {
+        method: 'POST',
+        body: form,
+      });
+      var data = await resp.json();
+      if (!resp.ok || data.ok === false) throw new Error(data.error || data.detail || '上传失败');
+      showToast('已绑定参考音频，Fish 将优先使用它生成角色声音', 'success');
+      fileInput.value = '';
+      transcriptInput.value = '';
+    } catch(e) {
+      showToast(e.message, 'error');
+    }
+  });
+
+  async function loadVoiceOptions() {
+    try {
+      voiceOptions = await apiCall('GET', '/api/voice-options');
+    } catch(e) {
+      voiceOptions = {
+        default_provider: 'edge_tts',
+        providers: ['edge_tts', 'fish_audio'],
+        fish_requires_reference_id: false,
+        fish_prompt_without_reference: true,
+        fish_voice_library: [],
+      };
+    }
+  }
+
+  function renderVoiceProfile(vp) {
+    var fields = [
+      ['声音年龄', vp.voice_age], ['性别倾向', vp.gender_tone], ['音色', vp.timbre],
+      ['音高', vp.pitch], ['语速', vp.speed], ['音量', vp.volume],
+      ['情绪表达', vp.emotion_level], ['停顿方式', vp.pause_style], ['咬字', vp.articulation],
+      ['距离感', vp.distance_feeling], ['情绪色彩', (vp.emotional_color||[]).join('、')],
+    ];
+    var grid = '<div class="voice-grid">';
+    fields.forEach(function(f) {
+      grid += '<div class="voice-item"><div class="voice-item-label">'+f[0]+'</div><div class="voice-item-value">'+(f[1]||'—')+'</div></div>';
+    });
+    grid += '</div>';
+
+    var html = '';
+    if (vp.voice_summary) html += '<div class="voice-summary">' + vp.voice_summary + '</div>';
+    if (vp.reason) html += '<div class="voice-reason">' + vp.reason + '</div>';
+    if (vp.reference_strategy) html += '<div class="voice-fish-note">' + vp.reference_strategy + '</div>';
+    html += grid;
+    if (vp.sample_text) {
+      html += '<div class="voice-sample"><div class="voice-sample-text">"' + vp.sample_text + '"</div>';
+      html += '<div class="voice-sample-player"></div></div>';
+    }
+    if (vp.warnings && vp.warnings.length > 0) {
+      html += '<div class="voice-warnings">' + vp.warnings.join('; ') + '</div>';
+    }
+    var hints = vp.provider_hints || {};
+    var directive = hints.fish_tts_directive || vp.fish_tts_directive || {};
+    var prosody = directive.prosody || {};
+    var provider = hints.provider || (voiceOptions && voiceOptions.default_provider) || 'edge_tts';
+    var library = (voiceOptions && voiceOptions.fish_voice_library) || [];
+    html += '<div class="voice-provider-section">';
+    html += '<label>试听引擎</label>';
+    html += '<select id="voice-provider-select" class="voice-select">';
+    html += '<option value="edge_tts"' + (provider === 'edge_tts' ? ' selected' : '') + '>Edge TTS（按性别/音高自动匹配）</option>';
+    html += '<option value="fish_audio"' + (provider === 'fish_audio' ? ' selected' : '') + '>Fish Audio（OC 声音 prompt 驱动）</option>';
+    html += '</select>';
+    html += '</div>';
+    html += '<div class="voice-provider-section">';
+    html += '<label>Fish 音色</label>';
+    html += '<select id="voice-fish-library" class="voice-select">';
+    html += '<option value="">手动填写 reference_id</option>';
+    library.forEach(function(item) {
+      var disabled = item.configured ? '' : ' disabled';
+      var selected = item.reference_id && item.reference_id === hints.fish_reference_id ? ' selected' : '';
+      html += '<option value="' + item.reference_id + '"' + disabled + selected + '>' + item.label + (item.configured ? '' : '（未配置）') + '</option>';
+    });
+    html += '</select>';
+    html += '</div>';
+    html += '<div class="voice-provider-section">';
+    html += '<label>Fish 表演标签</label>';
+    html += '<input type="text" id="voice-fish-prefix" class="voice-edit-input" placeholder="例如 (calm) (sad)" value="' + (directive.text_prefix || hints.fish_voice_prompt || vp.fish_voice_prompt || '') + '">';
+    html += '</div>';
+    html += '<div class="voice-provider-section">';
+    html += '<label>Fish 语速 / 音量</label>';
+    html += '<div class="voice-prosody-row">';
+    html += '<input type="number" id="voice-fish-speed" class="voice-number-input" min="0.7" max="1.2" step="0.01" value="' + (prosody.speed || 0.9) + '">';
+    html += '<input type="number" id="voice-fish-volume" class="voice-number-input" min="-8" max="3" step="1" value="' + (prosody.volume || -3) + '">';
+    html += '</div>';
+    html += '</div>';
+    if (directive.performance_note) html += '<div class="voice-fish-note">' + directive.performance_note + '</div>';
+    if (directive.avoid && directive.avoid.length) html += '<div class="voice-warnings">避免: ' + directive.avoid.join('、') + '</div>';
+    html += '<div class="voice-edit-section">';
+    html += '<input type="text" id="voice-edit-ref" class="voice-edit-input" placeholder="Fish reference_id，例如 8ef4..." value="' + (hints.fish_reference_id || '') + '">';
+    html += '<button id="btn-voice-save" class="btn-search-go">保存设置</button>';
+    html += '</div>';
+    voiceContent.innerHTML = html;
+
+    var librarySelect = document.getElementById('voice-fish-library');
+    if (librarySelect) {
+      librarySelect.addEventListener('change', function() {
+        var refInput = document.getElementById('voice-edit-ref');
+        if (refInput) refInput.value = this.value;
+      });
+    }
+
+    // Wire save button
+    var btnSave = document.getElementById('btn-voice-save');
+    if (btnSave) {
+      btnSave.addEventListener('click', async function() {
+        var providerSelect = document.getElementById('voice-provider-select');
+        var refId = document.getElementById('voice-edit-ref').value.trim();
+        var fishPrefix = document.getElementById('voice-fish-prefix').value.trim();
+        var fishSpeed = Number(document.getElementById('voice-fish-speed').value || 0.9);
+        var fishVolume = Number(document.getElementById('voice-fish-volume').value || -3);
+        var updates = { provider_hints: { provider: providerSelect ? providerSelect.value : 'edge_tts' } };
+        if (refId) {
+          updates.provider_hints.fish_reference_id = refId;
+        }
+        updates.fish_tts_directive = {
+          text_prefix: fishPrefix,
+          prosody: { speed: fishSpeed, volume: fishVolume },
+        };
+        updates.provider_hints.fish_tts_directive = updates.fish_tts_directive;
+        updates.fish_voice_prompt = fishPrefix;
+        try {
+          await apiCall('PATCH', '/api/sessions/' + state.sessionId + '/voice-profile', updates);
+          showToast('已保存', 'success');
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    }
+  }
+
+  function renderVoiceCastResult(data) {
+    var candidates = data.candidates || [];
+    var box = document.createElement('div');
+    box.className = 'voice-cast-result';
+    var html = '<div class="voice-summary">音色底座候选</div>';
+    if (data.strategy) html += '<div class="voice-reason">' + data.strategy + '</div>';
+    if (data.warning) html += '<div class="voice-warnings">' + data.warning + '</div>';
+    if (!candidates.length) {
+      html += '<div class="voice-loading">暂无候选。可以在 config.yaml 增加 Fish reference_id。</div>';
+    } else {
+      html += '<div class="voice-candidate-list">';
+      candidates.forEach(function(c, idx) {
+        html += '<div class="voice-candidate">';
+        html += '<div><strong>' + (idx + 1) + '. ' + (c.title || c.reference_id) + '</strong></div>';
+        html += '<div class="voice-candidate-meta">' + (c.source || '') + ' · score ' + Math.round((c.score || 0) * 10) / 10 + '</div>';
+        html += '<div class="voice-candidate-ref">' + c.reference_id + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+    box.innerHTML = html;
+    voiceContent.appendChild(box);
+  }
+
   // Library
   btnLibrary.addEventListener('click', showLibrary);
   btnCloseLibrary.addEventListener('click', hideLibrary);

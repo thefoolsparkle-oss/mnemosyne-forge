@@ -24,20 +24,57 @@ SESSION_SECONDS = 60 * 60 * 24 * 30
 GUEST_SECONDS = 60 * 60 * 24 * 3
 SESSION_REFRESH_SECONDS = 60 * 60 * 24 * 7
 PASSWORD_ITERATIONS = 240_000
+LOCAL_AUTH_USER_OFFSET = 1_000_000_000
+_auth_db_cache: Path | None = None
 
 
-def _auth_db_path() -> Path:
-    cfg = get_config()
-    shared = cfg.get("auth", {}).get("shared_db_path", "")
-    if shared:
-        return Path(shared)
-    # Fallback: local auth DB
+def _local_auth_db_path() -> Path:
     from .config import get_project_root
     return get_project_root() / "data" / "auth.db"
 
 
+def _can_write_sqlite(path: Path) -> bool:
+    """Return whether SQLite can write to this database and its sidecar files."""
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(path))
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+        finally:
+            conn.close()
+        return True
+    except sqlite3.OperationalError as exc:
+        if "readonly" in str(exc).lower() or "unable to open" in str(exc).lower():
+            return False
+        raise
+
+
+def _auth_db_path() -> Path:
+    global _auth_db_cache
+    if _auth_db_cache is not None:
+        return _auth_db_cache
+
+    cfg = get_config()
+    shared = cfg.get("auth", {}).get("shared_db_path", "")
+    if shared:
+        shared_path = Path(shared)
+        if _can_write_sqlite(shared_path):
+            _auth_db_cache = shared_path
+            return _auth_db_cache
+
+    _auth_db_cache = _local_auth_db_path()
+    return _auth_db_cache
+
+
 def now_ts() -> int:
     return int(time.time())
+
+
+def forge_user_id(user_id: int) -> int:
+    """Map auth users to the user_id stored on Forge sessions."""
+    if _auth_db_path() == _local_auth_db_path():
+        return LOCAL_AUTH_USER_OFFSET + int(user_id)
+    return int(user_id)
 
 
 def _dict_from_row(row: sqlite3.Row | None) -> dict | None:
@@ -124,6 +161,7 @@ def public_user(user: dict[str, Any]) -> dict[str, Any]:
     guest_expires_at = int(user.get("guest_expires_at") or 0)
     return {
         "id": user["id"],
+        "forge_user_id": forge_user_id(int(user["id"])),
         "username": user["username"],
         "role": user.get("role", "user"),
         "status": user["status"],
@@ -277,6 +315,7 @@ def current_user(
                     "UPDATE sessions SET expires_at = ? WHERE token = ?",
                     (ts + SESSION_SECONDS, token),
                 )
+    user["forge_user_id"] = forge_user_id(int(user["id"]))
     return user
 
 

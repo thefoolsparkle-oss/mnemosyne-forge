@@ -60,6 +60,13 @@ VOICE_TEMPLATES: dict[str, dict] = {
         "pitch": "-5Hz",
         "rate": "-10%",
     },
+    "neutral_androgynous": {
+        "label": "中性声线",
+        "traits": ["中性", "冷静", "理智", "疏离", "超然"],
+        "zh_voice": "zh-CN-YunxiNeural",
+        "pitch": "+0Hz",
+        "rate": "-3%",
+    },
 }
 
 

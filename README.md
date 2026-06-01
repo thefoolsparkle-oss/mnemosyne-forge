@@ -37,10 +37,16 @@ STABILITY_API_KEY=sk-your-key   # 生图需要
 ## 启动
 
 ```powershell
-.\run_dev.ps1   # 一键启动服务器 + cloudflared 公网隧道
+powershell -ExecutionPolicy Bypass -File .\run_dev.ps1
 ```
 
 打开 http://127.0.0.1:8010
+
+如果不需要公网隧道，也可以直接启动后端：
+
+```powershell
+python -m uvicorn app.server:app --host 127.0.0.1 --port 8010 --reload
+```
 
 ## API
 

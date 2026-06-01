@@ -2,7 +2,45 @@
 # Usage: .\run_dev.ps1
 
 $ErrorActionPreference = "Stop"
-Write-Host "=== Mnemosyne Forge / 造枝 ===" -ForegroundColor Cyan
+Write-Host "=== Mnemosyne Forge ===" -ForegroundColor Cyan
+
+function Resolve-Python {
+    $candidates = @(
+        "C:\Users\Yue\AppData\Local\Programs\Python\Python314\python.exe",
+        "C:\Users\Yue\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe",
+        "python",
+        "py"
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($candidate -like "*.exe") {
+            if (Test-Path $candidate) {
+                & $candidate -c "import sys; print(sys.executable)" 2>$null 1>$null
+                if ($LASTEXITCODE -eq 0) { return $candidate }
+            }
+            continue
+        }
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($cmd) {
+            & $cmd.Source -c "import sys; print(sys.executable)" 2>$null 1>$null
+            if ($LASTEXITCODE -eq 0) { return $cmd.Source }
+        }
+    }
+
+    throw "No Python executable found. Please install Python 3.11+ or update run_dev.ps1."
+}
+
+$PythonExe = Resolve-Python
+Write-Host "Using Python: $PythonExe" -ForegroundColor Green
+
+# Some Windows shells expose both Path and PATH, which can make Start-Process fail.
+$pathValue = [Environment]::GetEnvironmentVariable("Path", "Process")
+if (-not $pathValue) {
+    $pathValue = [Environment]::GetEnvironmentVariable("PATH", "Process")
+}
+Remove-Item Env:Path -ErrorAction SilentlyContinue
+Remove-Item Env:PATH -ErrorAction SilentlyContinue
+$env:Path = $pathValue
 
 # Check for .env
 if (Test-Path ".env") {
@@ -17,9 +55,10 @@ if (Test-Path ".env") {
 }
 
 # Install deps if needed
-if (-not (Get-Command uvicorn -ErrorAction SilentlyContinue)) {
+& $PythonExe -c "import fastapi, uvicorn, pydantic, yaml, httpx" 2>$null
+if ($LASTEXITCODE -ne 0) {
     Write-Host "Installing dependencies..." -ForegroundColor Green
-    py -m pip install -r requirements.txt
+    & $PythonExe -m pip install -r requirements.txt
 }
 
 # Clean old processes
@@ -29,7 +68,7 @@ Remove-Item -Path "app\__pycache__" -Recurse -Force -ErrorAction SilentlyContinu
 
 # Start server
 Write-Host "Starting server on http://127.0.0.1:8010 ..." -ForegroundColor Cyan
-Start-Process -FilePath "py" -ArgumentList "-u","-m","uvicorn","app.server:app","--host","127.0.0.1","--port","8010","--reload"
+Start-Process -FilePath $PythonExe -ArgumentList "-u","-m","uvicorn","app.server:app","--host","127.0.0.1","--port","8010","--reload" -WindowStyle Hidden
 Start-Sleep -Seconds 3
 
 # Start cloudflared tunnel
@@ -41,13 +80,13 @@ if (Test-Path $cloudflared) {
     $url = Get-Content $tunnelLog | Select-String "trycloudflare.com" | ForEach-Object { $_.Line -replace '.*?(https://[^ ]+).*','$1' } | Select-Object -First 1
     if ($url) {
         Write-Host "" -ForegroundColor Cyan
-        Write-Host "  公网地址: $url" -ForegroundColor Green
+        Write-Host "  Public URL: $url" -ForegroundColor Green
         Write-Host ""
     }
 }
 
-Write-Host "本地地址: http://127.0.0.1:8010" -ForegroundColor Cyan
-Write-Host "按 Ctrl+C 后运行 Stop-Process -Name python*,cloudflared* 来停止" -ForegroundColor Yellow
+Write-Host "Local URL: http://127.0.0.1:8010" -ForegroundColor Cyan
+Write-Host "Press any key to close this window. To stop later, run: Stop-Process -Name python*,cloudflared*" -ForegroundColor Yellow
 
 # Keep window open
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
