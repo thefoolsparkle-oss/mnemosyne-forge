@@ -18,6 +18,7 @@ from . import auth, db, oc_session
 from .config import get_app_config, get_project_root
 
 app = FastAPI(title="Mnemosyne Forge", version="0.1.0")
+MAX_VOICE_REFERENCE_BYTES = 50 * 1024 * 1024
 
 # CORS — allow local development
 app.add_middleware(
@@ -322,8 +323,9 @@ async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Dep
         raise HTTPException(status_code=404, detail="Session not found")
     style = body.get("style", "anime portrait")
     prompt = await build_image_prompt(draft, style)
-    audit = await audit_image_prompt(draft, prompt)
-    result = await generate_character_image(draft, style)
+    negative_prompt = "low quality, blurry, ugly, deformed, bad anatomy, extra fingers, missing fingers, watermark, text, logo, signature"
+    audit = await audit_image_prompt(draft, prompt, negative_prompt)
+    result = await generate_character_image(draft, style, prompt=prompt, negative_prompt=negative_prompt)
     result["audit"] = audit
     return result
 
@@ -429,6 +431,7 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
     try:
         provider = get_provider(provider_name)
         result_path = await provider.synthesize(text, profile, output_path)
+        db.save_voice_profile(session_id, json.dumps(profile, ensure_ascii=False))
         db.insert_voice_generation(session_id, provider_name, text, json.dumps(profile, ensure_ascii=False), result_path)
         from pathlib import Path
         audio_url = "/exports/voices/" + Path(result_path).name
@@ -459,7 +462,9 @@ async def upload_voice_reference(
     output_dir = get_project_root() / "data" / "voice_references" / session_id
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"fish_reference_{len(db.get_voice_references(session_id)) + 1}{ext}"
-    content = await file.read()
+    content = await file.read(MAX_VOICE_REFERENCE_BYTES + 1)
+    if len(content) > MAX_VOICE_REFERENCE_BYTES:
+        raise HTTPException(status_code=413, detail="Reference audio is too large. Max size is 50MB.")
     output_path.write_bytes(content)
     ref_id = db.insert_voice_reference(session_id, str(output_path), transcript.strip(), label.strip(), "fish_audio")
     return {
@@ -529,7 +534,7 @@ async def voice_options(user: dict[str, Any] = Depends(auth.current_user)):
     return {
         "ok": True,
         "default_provider": vc.get("provider", "edge_tts"),
-        "providers": ["edge_tts", "fish_audio"],
+        "providers": ["elevenlabs", "edge_tts", "fish_audio"],
         "fish_requires_reference_id": False,
         "fish_prompt_without_reference": fish_cfg.get("prompt_without_reference", True),
         "fish_voice_library": library,

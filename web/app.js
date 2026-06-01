@@ -117,10 +117,7 @@
   // ─── Markdown rendering (basic) ──────────────────────
   function renderMarkdown(text) {
     if (!text) return '';
-    let html = text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;');
+    let html = escapeHtml(text);
 
     // Bold
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
@@ -140,6 +137,19 @@
     html = html.replace(/\n/g, '<br>');
 
     return html;
+  }
+
+  function escapeHtml(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function escapeAttr(value) {
+    return escapeHtml(value);
   }
 
   // ─── Chat rendering ──────────────────────────────────
@@ -412,7 +422,7 @@
   function showCardPreview(card) {
     var data = card.data || card;
     cardName.textContent = data.name || '未命名';
-    cardTags.innerHTML = (data.tags || []).map(function(t) { return '<span class="card-tag">' + t + '</span>'; }).join('');
+    cardTags.innerHTML = (data.tags || []).map(function(t) { return '<span class="card-tag">' + escapeHtml(t) + '</span>'; }).join('');
     cardDescription.textContent = data.description || '';
     cardPersonality.textContent = data.personality || '';
     cardScenario.textContent = data.scenario || '';
@@ -422,7 +432,7 @@
     var greetings = $('#card-greetings');
     var greetsSection = $('#card-greetings-section');
     if (data.alternate_greetings && data.alternate_greetings.length > 0) {
-      greetings.innerHTML = data.alternate_greetings.map(function(g) { return '<p class="card-quote">' + g + '</p>'; }).join('');
+      greetings.innerHTML = data.alternate_greetings.map(function(g) { return '<p class="card-quote">' + escapeHtml(g) + '</p>'; }).join('');
       greetsSection.classList.remove('hidden');
     } else {
       greetsSection.classList.add('hidden');
@@ -499,16 +509,16 @@
         var date = new Date(s.updated_at).toLocaleDateString('zh-CN');
 
         div.innerHTML =
-          '<div class="library-item-avatar">' + (name[0] || '?') + '</div>' +
+          '<div class="library-item-avatar">' + escapeHtml(name[0] || '?') + '</div>' +
           '<div class="library-item-info">' +
-            '<div class="library-item-name">' + name + '</div>' +
-            '<div class="library-item-concept">' + (concept || '无描述') + '</div>' +
+            '<div class="library-item-name">' + escapeHtml(name) + '</div>' +
+            '<div class="library-item-concept">' + escapeHtml(concept || '无描述') + '</div>' +
           '</div>' +
           '<div class="library-item-meta">' +
             '<div class="library-item-score">' + score + '%</div>' +
-            '<div class="library-item-date">' + date + '</div>' +
+            '<div class="library-item-date">' + escapeHtml(date) + '</div>' +
           '</div>' +
-          '<button class="library-item-del" data-sid="' + s.id + '">&times;</button>';
+          '<button class="library-item-del" data-sid="' + escapeAttr(s.id) + '">&times;</button>';
 
         div.querySelector('.library-item-del').addEventListener('click', function(e) {
           e.stopPropagation();
@@ -520,7 +530,7 @@
 
       btnLibrary.textContent = '角色库 (' + sessions.length + ')';
     } catch (e) {
-      libraryList.innerHTML = '<div class="library-empty">加载失败：' + e.message + '</div>';
+      libraryList.innerHTML = '<div class="library-empty">加载失败：' + escapeHtml(e.message) + '</div>';
       btnLibrary.textContent = '角色库';
     }
   }
@@ -728,7 +738,7 @@
       if (!voiceOptions) await loadVoiceOptions();
       var data = await apiCall('GET', '/api/sessions/' + state.sessionId + '/voice-profile');
       renderVoiceProfile(data.voice_profile);
-    } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + e.message + '</div>'; }
+    } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>'; }
   });
 
   $('#btn-voice-generate').addEventListener('click', async function() {
@@ -755,7 +765,7 @@
       if (data.ok) {
         var player = voiceContent.querySelector('.voice-sample-player');
         if (player) {
-          player.innerHTML = '<audio controls src="' + (data.audio_url || data.audio_path) + '"></audio>';
+          player.innerHTML = '<audio controls src="' + escapeAttr(data.audio_url || data.audio_path) + '"></audio>';
         }
         showToast('试听已生成', 'success');
       } else {
@@ -779,7 +789,7 @@
         showToast(data.warning || '没有找到高可信中文音色底座', 'error');
       }
     } catch(e) {
-      voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + e.message + '</div>';
+      voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>';
     }
   });
 
@@ -838,21 +848,21 @@
     ];
     var grid = '<div class="voice-grid">';
     fields.forEach(function(f) {
-      grid += '<div class="voice-item"><div class="voice-item-label">'+f[0]+'</div><div class="voice-item-value">'+(f[1]||'—')+'</div></div>';
+      grid += '<div class="voice-item"><div class="voice-item-label">'+escapeHtml(f[0])+'</div><div class="voice-item-value">'+escapeHtml(f[1]||'—')+'</div></div>';
     });
     grid += '</div>';
 
     var html = '';
-    if (vp.voice_summary) html += '<div class="voice-summary">' + vp.voice_summary + '</div>';
-    if (vp.reason) html += '<div class="voice-reason">' + vp.reason + '</div>';
-    if (vp.reference_strategy) html += '<div class="voice-fish-note">' + vp.reference_strategy + '</div>';
+    if (vp.voice_summary) html += '<div class="voice-summary">' + escapeHtml(vp.voice_summary) + '</div>';
+    if (vp.reason) html += '<div class="voice-reason">' + escapeHtml(vp.reason) + '</div>';
+    if (vp.reference_strategy) html += '<div class="voice-fish-note">' + escapeHtml(vp.reference_strategy) + '</div>';
     html += grid;
     if (vp.sample_text) {
-      html += '<div class="voice-sample"><div class="voice-sample-text">"' + vp.sample_text + '"</div>';
+      html += '<div class="voice-sample"><div class="voice-sample-text">"' + escapeHtml(vp.sample_text) + '"</div>';
       html += '<div class="voice-sample-player"></div></div>';
     }
     if (vp.warnings && vp.warnings.length > 0) {
-      html += '<div class="voice-warnings">' + vp.warnings.join('; ') + '</div>';
+      html += '<div class="voice-warnings">' + escapeHtml(vp.warnings.join('; ')) + '</div>';
     }
     var hints = vp.provider_hints || {};
     var directive = hints.fish_tts_directive || vp.fish_tts_directive || {};
@@ -862,8 +872,14 @@
     html += '<div class="voice-provider-section">';
     html += '<label>试听引擎</label>';
     html += '<select id="voice-provider-select" class="voice-select">';
-    html += '<option value="edge_tts"' + (provider === 'edge_tts' ? ' selected' : '') + '>Edge TTS（按性别/音高自动匹配）</option>';
-    html += '<option value="fish_audio"' + (provider === 'fish_audio' ? ' selected' : '') + '>Fish Audio（OC 声音 prompt 驱动）</option>';
+    var providerLabels = {
+      elevenlabs: 'ElevenLabs（专属音色 / 中文 TTS）',
+      edge_tts: 'Edge TTS（按性别/音高自动匹配）',
+      fish_audio: 'Fish Audio（reference_id / 参考音频）',
+    };
+    ((voiceOptions && voiceOptions.providers) || ['elevenlabs', 'edge_tts', 'fish_audio']).forEach(function(name) {
+      html += '<option value="' + escapeAttr(name) + '"' + (provider === name ? ' selected' : '') + '>' + escapeHtml(providerLabels[name] || name) + '</option>';
+    });
     html += '</select>';
     html += '</div>';
     html += '<div class="voice-provider-section">';
@@ -873,13 +889,13 @@
     library.forEach(function(item) {
       var disabled = item.configured ? '' : ' disabled';
       var selected = item.reference_id && item.reference_id === hints.fish_reference_id ? ' selected' : '';
-      html += '<option value="' + item.reference_id + '"' + disabled + selected + '>' + item.label + (item.configured ? '' : '（未配置）') + '</option>';
+      html += '<option value="' + escapeAttr(item.reference_id) + '"' + disabled + selected + '>' + escapeHtml(item.label + (item.configured ? '' : '（未配置）')) + '</option>';
     });
     html += '</select>';
     html += '</div>';
     html += '<div class="voice-provider-section">';
     html += '<label>Fish 表演标签</label>';
-    html += '<input type="text" id="voice-fish-prefix" class="voice-edit-input" placeholder="例如 (calm) (sad)" value="' + (directive.text_prefix || hints.fish_voice_prompt || vp.fish_voice_prompt || '') + '">';
+    html += '<input type="text" id="voice-fish-prefix" class="voice-edit-input" placeholder="例如 (calm) (sad)" value="' + escapeAttr(directive.text_prefix || hints.fish_voice_prompt || vp.fish_voice_prompt || '') + '">';
     html += '</div>';
     html += '<div class="voice-provider-section">';
     html += '<label>Fish 语速 / 音量</label>';
@@ -888,10 +904,10 @@
     html += '<input type="number" id="voice-fish-volume" class="voice-number-input" min="-8" max="3" step="1" value="' + (prosody.volume || -3) + '">';
     html += '</div>';
     html += '</div>';
-    if (directive.performance_note) html += '<div class="voice-fish-note">' + directive.performance_note + '</div>';
-    if (directive.avoid && directive.avoid.length) html += '<div class="voice-warnings">避免: ' + directive.avoid.join('、') + '</div>';
+    if (directive.performance_note) html += '<div class="voice-fish-note">' + escapeHtml(directive.performance_note) + '</div>';
+    if (directive.avoid && directive.avoid.length) html += '<div class="voice-warnings">避免: ' + escapeHtml(directive.avoid.join('、')) + '</div>';
     html += '<div class="voice-edit-section">';
-    html += '<input type="text" id="voice-edit-ref" class="voice-edit-input" placeholder="Fish reference_id，例如 8ef4..." value="' + (hints.fish_reference_id || '') + '">';
+    html += '<input type="text" id="voice-edit-ref" class="voice-edit-input" placeholder="Fish reference_id，例如 8ef4..." value="' + escapeAttr(hints.fish_reference_id || '') + '">';
     html += '<button id="btn-voice-save" class="btn-search-go">保存设置</button>';
     html += '</div>';
     voiceContent.innerHTML = html;
@@ -936,17 +952,17 @@
     var box = document.createElement('div');
     box.className = 'voice-cast-result';
     var html = '<div class="voice-summary">音色底座候选</div>';
-    if (data.strategy) html += '<div class="voice-reason">' + data.strategy + '</div>';
-    if (data.warning) html += '<div class="voice-warnings">' + data.warning + '</div>';
+    if (data.strategy) html += '<div class="voice-reason">' + escapeHtml(data.strategy) + '</div>';
+    if (data.warning) html += '<div class="voice-warnings">' + escapeHtml(data.warning) + '</div>';
     if (!candidates.length) {
       html += '<div class="voice-loading">暂无候选。可以在 config.yaml 增加 Fish reference_id。</div>';
     } else {
       html += '<div class="voice-candidate-list">';
       candidates.forEach(function(c, idx) {
         html += '<div class="voice-candidate">';
-        html += '<div><strong>' + (idx + 1) + '. ' + (c.title || c.reference_id) + '</strong></div>';
-        html += '<div class="voice-candidate-meta">' + (c.source || '') + ' · score ' + Math.round((c.score || 0) * 10) / 10 + '</div>';
-        html += '<div class="voice-candidate-ref">' + c.reference_id + '</div>';
+        html += '<div><strong>' + (idx + 1) + '. ' + escapeHtml(c.title || c.reference_id) + '</strong></div>';
+        html += '<div class="voice-candidate-meta">' + escapeHtml(c.source || '') + ' · score ' + Math.round((c.score || 0) * 10) / 10 + '</div>';
+        html += '<div class="voice-candidate-ref">' + escapeHtml(c.reference_id) + '</div>';
         html += '</div>';
       });
       html += '</div>';
@@ -1021,10 +1037,10 @@
         renderInspirationCard({ title: '搜索结果', summary: '', usable_ideas: data.results.map(function(r) { return r.title + ': ' + r.snippet.slice(0, 100); }), sources: data.results });
         loadSearchHistory();
       } else {
-        searchResult.innerHTML = '<div class="search-error">' + (data.error || '未找到结果') + '</div>';
+        searchResult.innerHTML = '<div class="search-error">' + escapeHtml(data.error || '未找到结果') + '</div>';
       }
     } catch (e) {
-      searchResult.innerHTML = '<div class="search-error">' + e.message + '</div>';
+      searchResult.innerHTML = '<div class="search-error">' + escapeHtml(e.message) + '</div>';
     } finally {
       btnSearchGo.disabled = false;
     }
@@ -1032,22 +1048,22 @@
 
   function renderInspirationCard(insp) {
     var html = '<div class="inspiration-card">';
-    html += '<h4>' + (insp.title || '搜索灵感') + '</h4>';
-    if (insp.summary) html += '<div class="insp-summary">' + insp.summary + '</div>';
+    html += '<h4>' + escapeHtml(insp.title || '搜索灵感') + '</h4>';
+    if (insp.summary) html += '<div class="insp-summary">' + escapeHtml(insp.summary) + '</div>';
     if (insp.usable_ideas && insp.usable_ideas.length > 0) {
       html += '<ul class="insp-ideas">';
       insp.usable_ideas.forEach(function(idea, i) {
-        html += '<li><span>' + idea + '</span><button class="btn-adopt-idea" data-idea="' + i + '">采用</button></li>';
+        html += '<li><span>' + escapeHtml(idea) + '</span><button class="btn-adopt-idea" data-idea="' + i + '">采用</button></li>';
       });
       html += '</ul>';
     }
     if (insp.cautions && insp.cautions.length > 0) {
-      html += '<div class="insp-cautions">注意: ' + insp.cautions.join('; ') + '</div>';
+      html += '<div class="insp-cautions">注意: ' + escapeHtml(insp.cautions.join('; ')) + '</div>';
     }
     if (insp.sources && insp.sources.length > 0) {
       html += '<div class="insp-sources">参考来源: ';
       insp.sources.forEach(function(s) {
-        html += '<a href="' + s.url + '" target="_blank">' + (s.title || s.url).slice(0, 30) + '</a> ';
+        html += '<a href="' + escapeAttr(s.url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml((s.title || s.url).slice(0, 30)) + '</a> ';
       });
       html += '</div>';
     }
@@ -1077,9 +1093,9 @@
         try {
           var q = JSON.parse(run.query_json);
           var inp = JSON.parse(run.inspiration_json);
-          html += '<div class="history-item" data-query="' + (q.query || '') + '">';
-          html += '<span class="history-query">' + (q.query || '').slice(0, 30) + '</span>';
-          html += '<span class="history-title-text">' + (inp.title || '').slice(0, 20) + '</span>';
+          html += '<div class="history-item" data-query="' + escapeAttr(q.query || '') + '">';
+          html += '<span class="history-query">' + escapeHtml((q.query || '').slice(0, 30)) + '</span>';
+          html += '<span class="history-title-text">' + escapeHtml((inp.title || '').slice(0, 20)) + '</span>';
           html += '<span class="history-time">' + new Date(run.created_at).toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit'}) + '</span>';
           html += '</div>';
         } catch(e) {}
@@ -1176,7 +1192,7 @@
     var label = user.username;
     if (user.role === 'admin') label += ' [管理]';
     if (user.is_guest) label += ' (游客)';
-    userStatus.innerHTML = '<span class="user-role">' + label + '</span>';
+    userStatus.innerHTML = '<span class="user-role">' + escapeHtml(label) + '</span>';
     btnLogin.textContent = '退出';
     btnLogin.onclick = async function() {
       try {

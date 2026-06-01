@@ -7,12 +7,12 @@ public model search. Prompting controls acting; reference_id controls identity.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
 from .config import get_config
+from .env_utils import read_env
 from .oc_models import OCDraft
 
 
@@ -111,7 +111,7 @@ def _configured_candidates(profile: dict) -> list[dict[str, Any]]:
 async def _search_public_models(profile: dict, limit: int = 8) -> list[dict[str, Any]]:
     cfg = get_config()
     fish_cfg = cfg.get("voice", {}).get("fish_audio", {})
-    api_key = os.getenv(fish_cfg.get("api_key_env", "FISH_API_KEY"), "")
+    api_key = read_env(fish_cfg.get("api_key_env", "FISH_API_KEY"))
     if not api_key:
         return []
 

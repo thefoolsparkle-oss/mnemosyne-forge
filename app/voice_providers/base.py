@@ -20,4 +20,7 @@ def get_provider(name: str):
     if name == "fish_audio":
         from .fish_audio_provider import FishAudioProvider
         return FishAudioProvider()
+    if name == "elevenlabs":
+        from .elevenlabs_provider import ElevenLabsProvider
+        return ElevenLabsProvider()
     raise ValueError(f"Unknown voice provider: {name}")

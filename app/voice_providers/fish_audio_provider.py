@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from ..env_utils import read_env
+
 
 class FishAudioProvider:
     async def synthesize(self, text: str, profile: dict, output_path: str, **kwargs) -> str:
@@ -17,7 +19,7 @@ class FishAudioProvider:
         cfg = get_config()
         fish_cfg = cfg.get("voice", {}).get("fish_audio", {})
         api_key_env = fish_cfg.get("api_key_env", "FISH_API_KEY")
-        api_key = os.getenv(api_key_env, "")
+        api_key = read_env(api_key_env)
         if not api_key:
             raise RuntimeError(f"{api_key_env} 环境变量未设置，请在 .env 中添加 {api_key_env}=your-key")
 

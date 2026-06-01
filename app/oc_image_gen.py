@@ -7,13 +7,13 @@ Supports prompt building and actual image generation via Stability API.
 from __future__ import annotations
 
 import base64
-import os
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from .config import get_config, get_project_root
+from .env_utils import read_env
 from .llm_client import chat
 from .oc_models import OCDraft
 
@@ -76,6 +76,8 @@ async def build_image_prompt(draft: OCDraft, style: str = "anime portrait") -> s
 async def generate_character_image(
     draft: OCDraft,
     style: str = "anime portrait",
+    prompt: str | None = None,
+    negative_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Generate a character image using Stability AI.
 
@@ -83,20 +85,20 @@ async def generate_character_image(
     """
     cfg = get_config()
     img_cfg = cfg.get("image", {})
-    api_key = os.getenv(img_cfg.get("api_key_env", ""), "")
+    api_key = read_env(img_cfg.get("api_key_env", ""))
 
     if not api_key:
-        prompt = await build_image_prompt(draft, style)
+        prompt = prompt or await build_image_prompt(draft, style)
         return {"ok": False, "error": "Stability API Key 未配置，请设置 STABILITY_API_KEY 环境变量", "prompt": prompt}
 
     # Build prompt
     if not draft.appearance:
         return {"ok": False, "error": "角色外貌信息不足，请先在草稿中补充外貌描述（发色、瞳色、服装、气质等）"}
-    prompt = await build_image_prompt(draft, style)
+    prompt = prompt or await build_image_prompt(draft, style)
     if not prompt:
         return {"ok": False, "error": "角色外貌信息不足，无法生成图片"}
 
-    negative_prompt = "low quality, blurry, ugly, deformed, bad anatomy, extra fingers, missing fingers, watermark, text, logo, signature"
+    negative_prompt = negative_prompt or "low quality, blurry, ugly, deformed, bad anatomy, extra fingers, missing fingers, watermark, text, logo, signature"
 
     # Call Stability AI
     try:

@@ -3,12 +3,13 @@
 Reads config.yaml and loads environment variables from .env (via python-dotenv).
 """
 
-import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 from dotenv import load_dotenv
+
+from .env_utils import read_env
 
 _project_root = Path(__file__).resolve().parent.parent
 _config_path = _project_root / "config.yaml"
@@ -56,7 +57,7 @@ def get_llm_config() -> dict[str, Any]:
 
     provider = providers[default].copy()
     env_var = provider.get("api_key_env", "")
-    api_key = os.getenv(env_var, "")
+    api_key = read_env(env_var)
 
     if not api_key:
         raise ValueError(

@@ -13,6 +13,7 @@ import re
 import httpx
 
 from .config import get_config
+from .env_utils import read_env
 
 
 def _resolve_agent_provider(agent: str | None = None) -> dict:
@@ -35,9 +36,8 @@ def _resolve_agent_provider(agent: str | None = None) -> dict:
         target = default
 
     provider = providers[target].copy()
-    import os
     env_var = provider.get("api_key_env", "")
-    api_key = os.getenv(env_var, "")
+    api_key = read_env(env_var)
 
     if not api_key:
         raise ValueError(f"API key not found for provider '{target}'. Set {env_var}")
