@@ -6,6 +6,9 @@ config.yaml
 data/
 exports/*.json
 exports/*.md
+exports/images/*
+exports/voices/*
+exports/references/*
 !exports/.gitkeep
 tunnel.log
 
