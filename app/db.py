@@ -93,15 +93,15 @@ def init_db() -> None:
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
             );
 
-            CREATE TABLE IF NOT EXISTS voice_references (
+            CREATE TABLE IF NOT EXISTS reference_audios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                audio_path TEXT NOT NULL,
-                transcript TEXT NOT NULL,
-                label TEXT NOT NULL DEFAULT '',
-                provider TEXT NOT NULL DEFAULT 'fish_audio',
-                created_at TEXT NOT NULL,
-                FOREIGN KEY(session_id) REFERENCES sessions(id)
+                user_id INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                duration_seconds REAL,
+                language TEXT NOT NULL DEFAULT 'zh',
+                transcript TEXT,
+                created_at TEXT NOT NULL
             );
         """)
         # Migration: add user_id if missing
@@ -365,6 +365,32 @@ def get_voice_references(session_id: str, provider: str | None = None) -> list[d
                 "SELECT * FROM voice_references WHERE session_id = ? ORDER BY id DESC",
                 (session_id,),
             ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def insert_reference_audio(user_id: int, label: str, file_path: str, transcript: str | None = None, language: str = "zh") -> int:
+    created_at = datetime.now(timezone.utc).isoformat()
+    conn = _get_conn()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO reference_audios (user_id, label, file_path, language, transcript, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, label, file_path, language, transcript, created_at),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def get_reference_audios(user_id: int) -> list[dict]:
+    conn = _get_conn()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM reference_audios WHERE user_id = ? ORDER BY id DESC",
+            (user_id,),
+        ).fetchall()
         return [dict(r) for r in rows]
     finally:
         conn.close()

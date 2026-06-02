@@ -774,6 +774,34 @@
     } catch(e) { showToast(e.message, 'error'); }
   });
 
+  $('#btn-voice-candidates').addEventListener('click', async function() {
+    if (!state.sessionId) return;
+    voiceContent.innerHTML = '<div class="voice-loading">生成三候选……</div>';
+    try {
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates', {});
+      renderVoiceCandidates(data.candidates || []);
+    } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + e.message + '</div>'; }
+  });
+
+  function renderVoiceCandidates(candidates) {
+    var html = '<div class="voice-candidate-list">';
+    html += '<div class="voice-summary">三候选对比</div>';
+    candidates.forEach(function(c) {
+      html += '<div class="voice-candidate">';
+      html += '<div class="voice-candidate-header"><strong>' + c.label + '</strong>';
+      html += '<span style="font-size:11px;color:var(--text-muted)"> st:' + Math.round(c.stability*100)/100 + ' sb:' + Math.round(c.similarity_boost*100)/100 + '</span>';
+      html += '</div>';
+      if (c.audio_url) {
+        html += '<audio controls src="' + c.audio_url + '" style="width:100%;margin-top:4px"></audio>';
+      } else if (c.error) {
+        html += '<div class="voice-loading" style="color:var(--error)">' + c.error + '</div>';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+    voiceContent.innerHTML = html;
+  }
+
   $('#btn-voice-cast').addEventListener('click', async function() {
     if (!state.sessionId) return;
     try {
@@ -960,7 +988,10 @@
       html += '<div class="voice-candidate-list">';
       candidates.forEach(function(c, idx) {
         html += '<div class="voice-candidate">';
-        html += '<div><strong>' + (idx + 1) + '. ' + escapeHtml(c.title || c.reference_id) + '</strong></div>';
+        html += '<div class="voice-candidate-header">';
+        html += '<strong>' + (idx + 1) + '. ' + escapeHtml(c.title || c.reference_id) + '</strong>';
+        html += '<button class="btn-adopt-idea voice-fav-btn" data-ref="' + escapeHtml(c.reference_id) + '" data-label="' + escapeHtml(c.title || '') + '">收藏</button>';
+        html += '</div>';
         html += '<div class="voice-candidate-meta">' + escapeHtml(c.source || '') + ' · score ' + Math.round((c.score || 0) * 10) / 10 + '</div>';
         html += '<div class="voice-candidate-ref">' + escapeHtml(c.reference_id) + '</div>';
         html += '</div>';
@@ -969,6 +1000,25 @@
     }
     box.innerHTML = html;
     voiceContent.appendChild(box);
+
+    // Wire favorite buttons
+    box.querySelectorAll('.voice-fav-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function(e) {
+        e.stopPropagation();
+        var refId = this.dataset.ref;
+        var label = this.dataset.label;
+        try {
+          await apiCall('POST', '/api/voice-library/favorite', {
+            reference_id: refId,
+            label: label || '收藏音色',
+            profile: { gender_tone: data.wanted_terms ? data.wanted_terms[0] : '' }
+          });
+          this.textContent = '已收藏';
+          this.disabled = true;
+          showToast('已加入音色库', 'success');
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    });
   }
 
   // Library

@@ -1,299 +1,145 @@
-"""ElevenLabs voice design + TTS provider.
+"""ElevenLabs provider — v0.8.
 
-This provider treats voice identity and performance as two separate layers:
-Voice Design creates a stable voice from the OC profile, then TTS reads the
-actual Chinese dialogue with that saved voice_id.
+Supports:
+- TTS with existing voice_id
+- Voice design from VoiceProfile (creates temporary voice)
 """
 
 from __future__ import annotations
 
-import base64
 import os
-from pathlib import Path
-from typing import Any
-
-from ..env_utils import read_env
 
 
 class ElevenLabsProvider:
     async def synthesize(self, text: str, profile: dict, output_path: str, **kwargs) -> str:
-        """Generate speech using an existing or newly designed ElevenLabs voice."""
-        voice_id = await self.ensure_voice(profile, output_path=output_path)
-        return await self.text_to_speech(text, voice_id, profile, output_path)
-
-    async def ensure_voice(self, profile: dict, output_path: str | None = None) -> str:
-        """Return a voice_id, creating one from Voice Design when needed."""
-        hints = profile.setdefault("provider_hints", {})
-        force_design = bool(hints.get("elevenlabs_force_design"))
-        if hints.get("elevenlabs_voice_id") and not force_design:
-            return str(hints["elevenlabs_voice_id"])
-
-        design = await self.design_voice(profile, output_path=output_path)
-        previews = design.get("previews") or []
-        if not previews:
-            raise RuntimeError("ElevenLabs Voice Design did not return previews.")
-
-        selected_index = max(1, int(hints.get("elevenlabs_selected_preview_index") or 1))
-        selected_index = min(selected_index, len(previews))
-        selected = previews[selected_index - 1]
-        voice = await self.create_voice(
-            generated_voice_id=selected["generated_voice_id"],
-            voice_name=self._voice_name(profile),
-            voice_description=design["voice_description"],
-            played_not_selected_voice_ids=[
-                p["generated_voice_id"]
-                for idx, p in enumerate(previews)
-                if idx != selected_index - 1
-                if p.get("generated_voice_id")
-            ],
-        )
-        hints["elevenlabs_voice_id"] = voice["voice_id"]
-        hints["elevenlabs_voice_name"] = voice.get("name") or self._voice_name(profile)
-        hints["elevenlabs_generated_voice_id"] = selected["generated_voice_id"]
-        hints["elevenlabs_selected_preview_index"] = selected_index
-        hints["elevenlabs_voice_description"] = design["voice_description"]
-        hints["elevenlabs_preview_paths"] = design.get("preview_paths", [])
-        hints["elevenlabs_previews"] = design.get("preview_metadata", [])
-        hints.pop("elevenlabs_force_design", None)
-        return str(voice["voice_id"])
-
-    async def design_voice(self, profile: dict, output_path: str | None = None) -> dict:
         from ..config import get_config
+        from ..env_utils import read_env
 
-        cfg = get_config().get("voice", {}).get("elevenlabs", {})
-        api_key = self._api_key(cfg)
-        model_id = cfg.get("voice_design_model_id", "eleven_multilingual_ttv_v2")
-        output_format = cfg.get("voice_design_output_format", cfg.get("output_format", "mp3_44100_128"))
-        voice_description = self._voice_description(profile)
-        preview_text = self._preview_text(profile)
+        cfg = get_config()
+        el_cfg = cfg.get("voice", {}).get("elevenlabs", {})
+        api_key = read_env(el_cfg.get("api_key_env", "ELEVENLABS_API_KEY"))
+        if not api_key:
+            raise RuntimeError("ELEVENLABS_API_KEY 环境变量未设置")
 
         import httpx
 
-        payload: dict[str, Any] = {
-            "voice_description": voice_description,
-            "model_id": model_id,
-            "text": preview_text,
-            "auto_generate_text": False,
-            "loudness": float(cfg.get("design_loudness", 0.35)),
-            "guidance_scale": float(cfg.get("design_guidance_scale", 4.0)),
-            "quality": float(cfg.get("design_quality", 0.7)),
-            "should_enhance": bool(cfg.get("design_should_enhance", True)),
-        }
+        voice_id = profile.get("provider_hints", {}).get("elevenlabs_voice_id", "")
 
-        seed = cfg.get("design_seed")
-        if seed is not None and seed != "":
-            payload["seed"] = int(seed)
+        # If no voice_id, use built-in voice (Bella for feminine, Adam for masculine)
+        if not voice_id:
+            gt = str(profile.get("gender_tone", "")).lower()
+            voice_id = "EXAVITQu4vr4xnSDxMaL" if "feminine" in gt else "pNInz6obpgDQGcFmaJgB"
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                "https://api.elevenlabs.io/v1/text-to-voice/design",
-                headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-                params={"output_format": output_format},
-                json=payload,
-            )
-        self._raise_for_error(resp, "ElevenLabs Voice Design")
-        data = resp.json()
-
-        preview_paths = []
-        if output_path:
-            preview_dir = Path(output_path).with_suffix("")
-            preview_dir.mkdir(parents=True, exist_ok=True)
-            for idx, preview in enumerate(data.get("previews", []), start=1):
-                audio_b64 = preview.get("audio_base_64")
-                if not audio_b64:
-                    continue
-                media_type = str(preview.get("media_type") or "audio/mpeg")
-                ext = ".mp3" if "mpeg" in media_type or "mp3" in media_type else ".wav"
-                preview_path = preview_dir / f"preview_{idx}{ext}"
-                preview_path.write_bytes(base64.b64decode(audio_b64))
-                preview_paths.append(str(preview_path))
-
-        data["voice_description"] = voice_description
-        data["preview_text"] = preview_text
-        data["preview_paths"] = preview_paths
-        data["preview_metadata"] = [
-            {
-                "index": idx,
-                "generated_voice_id": preview.get("generated_voice_id"),
-                "media_type": preview.get("media_type"),
-                "duration_secs": preview.get("duration_secs"),
-                "language": preview.get("language"),
-                "preview_path": preview_paths[idx - 1] if idx - 1 < len(preview_paths) else "",
-            }
-            for idx, preview in enumerate(data.get("previews", []), start=1)
-        ]
-        return data
-
-    async def create_voice(
-        self,
-        generated_voice_id: str,
-        voice_name: str,
-        voice_description: str,
-        played_not_selected_voice_ids: list[str] | None = None,
-    ) -> dict:
-        from ..config import get_config
-
-        cfg = get_config().get("voice", {}).get("elevenlabs", {})
-        api_key = self._api_key(cfg)
-        payload = {
-            "voice_name": voice_name,
-            "voice_description": voice_description,
-            "generated_voice_id": generated_voice_id,
-            "labels": {
-                "source": "mnemosyne_forge",
-                "language": "zh",
-                "use_case": "oc_character_voice",
+        # Build TTS request
+        tts_payload = {
+            "text": text,
+            "model_id": el_cfg.get("tts_model_id", "eleven_multilingual_v2"),
+            "voice_settings": {
+                "stability": el_cfg.get("stability", 0.58),
+                "similarity_boost": el_cfg.get("similarity_boost", 0.82),
+                "style": el_cfg.get("style", 0.22),
+                "speed": el_cfg.get("speed", 0.95),
+                "use_speaker_boost": el_cfg.get("use_speaker_boost", True),
             },
         }
-        if played_not_selected_voice_ids:
-            payload["played_not_selected_voice_ids"] = played_not_selected_voice_ids
 
-        import httpx
+        output_format = el_cfg.get("output_format", "mp3_44100_128")
+        headers = {
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
 
         async with httpx.AsyncClient(timeout=90.0) as client:
             resp = await client.post(
-                "https://api.elevenlabs.io/v1/text-to-voice",
-                headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-                json=payload,
-            )
-        self._raise_for_error(resp, "ElevenLabs Create Voice")
-        return resp.json()
-
-    async def text_to_speech(self, text: str, voice_id: str, profile: dict, output_path: str) -> str:
-        from ..config import get_config
-
-        cfg = get_config().get("voice", {}).get("elevenlabs", {})
-        api_key = self._api_key(cfg)
-        model_id = cfg.get("tts_model_id", "eleven_multilingual_v2")
-        output_format = cfg.get("output_format", "mp3_44100_128")
-        settings = self._voice_settings(profile, cfg)
-
-        payload: dict[str, Any] = {
-            "text": text,
-            "model_id": model_id,
-            "language_code": cfg.get("language_code", "zh"),
-            "voice_settings": settings,
-        }
-        seed = cfg.get("tts_seed")
-        if seed is not None and seed != "":
-            payload["seed"] = int(seed)
-
-        import httpx
-
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
                 f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-                headers={"xi-api-key": api_key, "Content-Type": "application/json"},
                 params={"output_format": output_format},
-                json=payload,
+                headers=headers,
+                json=tts_payload,
             )
-        self._raise_for_error(resp, "ElevenLabs TTS")
+
+        if resp.status_code == 401:
+            raise RuntimeError("ElevenLabs API Key 无效")
+        if resp.status_code != 200:
+            raise RuntimeError(f"ElevenLabs API 返回错误 {resp.status_code}: {resp.text[:200]}")
 
         os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
         with open(output_path, "wb") as f:
             f.write(resp.content)
         return output_path
 
-    @staticmethod
-    def _api_key(cfg: dict) -> str:
-        api_key_env = cfg.get("api_key_env", "ELEVENLABS_API_KEY")
-        api_key = read_env(api_key_env)
-        if not api_key:
-            raise RuntimeError(f"{api_key_env} 环境变量未设置。请在 .env 或当前 shell 里设置这个 key。")
-        return api_key
+    async def _design_voice(self, profile: dict, api_key: str, el_cfg: dict) -> str:
+        """Design a temporary voice from VoiceProfile using ElevenLabs Voice Design API.
 
-    @staticmethod
-    def _raise_for_error(resp: Any, label: str) -> None:
-        if resp.status_code in (401, 403):
-            raise RuntimeError(f"{label} 权限或 API key 无效: {resp.text[:300]}")
-        if resp.status_code >= 400:
-            raise RuntimeError(f"{label} 返回错误 {resp.status_code}: {resp.text[:500]}")
+        Two-step process: 1) create previews -> get generated_voice_id, 2) create voice from preview.
+        """
+        import httpx
+        import uuid
 
-    @staticmethod
-    def _voice_name(profile: dict) -> str:
-        name = str(profile.get("character_name") or profile.get("name") or "OC Voice")
-        for ch in '\\/:*?"<>|':
-            name = name.replace(ch, "_")
-        return f"Mnemosyne {name[:40]}"
-
-    @staticmethod
-    def _voice_description(profile: dict) -> str:
-        hints = profile.get("provider_hints", {}) or {}
-        if hints.get("elevenlabs_voice_description"):
-            return str(hints["elevenlabs_voice_description"])
-
-        age = profile.get("voice_age") or "young adult"
-        gender = profile.get("gender_tone") or "feminine"
-        timbre = profile.get("timbre") or "soft, clear, slightly breathy"
-        pitch = profile.get("pitch") or "medium high"
-        speed = profile.get("speed") or "slow"
-        emotion = profile.get("emotion_level") or "restrained"
-        colors = ", ".join(profile.get("emotional_color", []) or ["melancholic", "quiet"])
-        distance = profile.get("distance_feeling") or "distant but intimate"
-        speaking_style = profile.get("speaking_style") or "short Chinese sentences, guarded, emotionally controlled"
-        summary = profile.get("voice_summary") or ""
-
-        return (
-            f"A natural Mandarin Chinese character voice. {gender} {age} speaker; "
-            f"{timbre} timbre; {pitch} pitch; {speed} pacing; {emotion} emotional delivery. "
-            f"The voice should feel {distance}, with emotional colors of {colors}. "
-            f"Speaking style: {speaking_style}. {summary} "
-            "Avoid a robotic assistant tone, avoid exaggerated anime cuteness, avoid English narrator affect, "
-            "and avoid overacting. The result should sound like a real person speaking intimate Chinese dialogue."
-        )[:1000]
-
-    @staticmethod
-    def _preview_text(profile: dict) -> str:
+        # Build voice description
         parts = []
-        variants = profile.get("sample_variants") or []
-        for line in variants:
-            if line and line not in parts:
-                parts.append(str(line).strip())
-        sample = profile.get("sample_text")
-        if sample and sample not in parts:
-            parts.insert(0, str(sample).strip())
-        fallback = [
-            "别靠近我。那不是你该碰的东西。",
-            "我没有在等谁，只是这里比较安静。",
-            "如果你一定要留下，就别问我从前的事。",
-        ]
-        for line in fallback:
-            if line not in parts:
-                parts.append(line)
-        text = " ".join(parts)
-        while len(text) < 100:
-            text += " " + fallback[len(text) % len(fallback)]
-        return text[:1000]
+        for field in ["gender_tone", "voice_age", "timbre", "pitch", "emotion_level"]:
+            v = profile.get(field, "")
+            if v:
+                parts.append(f"{field}: {v}")
+        summary = profile.get("voice_summary", "")
+        if summary:
+            parts.append(summary)
+        voice_description = ". ".join(parts) if parts else "A natural, clear Chinese voice."
 
-    @staticmethod
-    def _voice_settings(profile: dict, cfg: dict) -> dict:
-        emotion = str(profile.get("emotion_level") or "").lower()
-        speed = str(profile.get("speed") or "").lower()
+        sample_text = profile.get("sample_text", "你好，这是我说话的方式。")
+        # ElevenLabs requires >= 100 characters
+        while len(sample_text) < 110:
+            sample_text = sample_text + " " + sample_text
 
-        stability = float(cfg.get("stability", 0.58))
-        similarity_boost = float(cfg.get("similarity_boost", 0.82))
-        style = float(cfg.get("style", 0.22))
-        speed_value = float(cfg.get("speed", 0.95))
+        generated_voice_id = uuid.uuid4().hex
+        headers = {"xi-api-key": api_key, "Content-Type": "application/json"}
 
-        if emotion in ("flat", "restrained"):
-            stability = max(stability, 0.62)
-            style = min(style, 0.18)
-        elif emotion in ("expressive", "intense"):
-            stability = min(stability, 0.48)
-            style = max(style, 0.35)
-
-        speed_value = {
-            "very_slow": 0.82,
-            "slow": 0.9,
-            "medium": 0.98,
-            "fast": 1.06,
-            "very_fast": 1.12,
-        }.get(speed, speed_value)
-
-        return {
-            "stability": stability,
-            "similarity_boost": similarity_boost,
-            "style": style,
-            "use_speaker_boost": bool(cfg.get("use_speaker_boost", True)),
-            "speed": speed_value,
+        # Step 1: Create voice previews
+        previews_payload = {
+            "voice_description": voice_description,
+            "text": sample_text,
+            "auto_generate_text": False,
+            "loudness": el_cfg.get("design_loudness", 0.35),
+            "quality": el_cfg.get("design_quality", 0.7),
+            "seed": 0,
+            "guidance_scale": el_cfg.get("design_guidance_scale", 4.0),
+            "generated_voice_id": generated_voice_id,
         }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.elevenlabs.io/v1/text-to-voice/create-previews",
+                headers=headers,
+                json=previews_payload,
+            )
+            if resp.status_code != 200:
+                return ""
+
+            previews = resp.json()
+            previews_list = previews.get("previews", [])
+            if not previews_list:
+                return ""
+
+            # Use the first preview's generated_voice_id
+            actual_generated_id = previews[0].get("generated_voice_id", generated_voice_id)
+
+        # Step 2: Create voice from preview
+        create_payload = {
+            "voice_name": f"forge_{uuid.uuid4().hex[:8]}",
+            "generated_voice_id": actual_generated_id,
+            "voice_description": voice_description,
+        }
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            resp = await client.post(
+                "https://api.elevenlabs.io/v1/text-to-voice/create-voice-from-preview",
+                headers=headers,
+                json=create_payload,
+            )
+
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get("voice_id", "")
+
+        return ""

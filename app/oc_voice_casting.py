@@ -162,17 +162,22 @@ async def _search_public_models(profile: dict, limit: int = 8) -> list[dict[str,
 async def cast_voice(draft: OCDraft, profile: dict, limit: int = 8) -> dict:
     """Return ranked Fish voice identity candidates for this OC."""
     configured = [c for c in _configured_candidates(profile) if c.get("score", 0) > -50]
-    public = [c for c in await _search_public_models(profile, limit=limit) if c.get("score", 0) > -50]
+    # Fish public model: only for manual exploration, NOT auto-matching
+    public = []
+    if not configured:
+        public = [c for c in await _search_public_models(profile, limit=limit) if c.get("score", 0) > -50]
     candidates = sorted(configured + public, key=lambda item: item.get("score", 0), reverse=True)[:limit]
-    recommendation = candidates[0] if candidates and candidates[0].get("score", 0) >= 3.0 else None
+    # Only auto-recommend from configured library
+    recommendation = candidates[0] if candidates and candidates[0].get("source") == "config" and candidates[0].get("score", 0) >= 3.0 else None
     return {
         "ok": True,
         "strategy": (
-            "中文角色必须先锁定可读中文的 reference_id 或 reference audio。"
-            "Fish public 英文/二次元/assistant 模型会导致中文崩坏，不应自动推荐。"
+            "优先从本地 voice_library 匹配可信中文音色。"
+            "Fish public model 仅在前端手动探索时使用，不作为自动推荐路径。"
         ),
         "needs_reference_audio": recommendation is None,
-        "warning": None if recommendation else "未找到高可信中文 Fish 声音底座；请提供中文 reference audio 或配置可靠中文 reference_id。",
+        "auto_matched": recommendation is not None,
+        "warning": None if recommendation else "本地音色库无可信中文底座。请在 config.yaml voice_library 中配置 reference_id，或上传中文 reference audio。",
         "wanted_terms": _want_terms(profile),
         "recommendation": recommendation,
         "candidates": candidates,

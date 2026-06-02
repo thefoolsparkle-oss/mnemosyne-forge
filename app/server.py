@@ -282,6 +282,37 @@ async def generate_world(session_id: str, user: dict[str, Any] = Depends(auth.cu
         return JSONResponse(status_code=500, content={"ok": False, "error": str(e)})
 
 
+@app.get("/api/sessions/{session_id}/visual-identity")
+async def visual_identity(session_id: str, user: dict[str, Any] = Depends(auth.current_user)):
+    from .oc_visual_identity import analyze_visual_identity
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    profile = await analyze_visual_identity(draft)
+    return {"ok": True, "visual_profile": profile}
+
+
+@app.post("/api/sessions/{session_id}/image-prompt-direct")
+async def image_prompt_direct(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    from .oc_image_prompt_director import direct_image_prompt
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    visual = body.get("visual_profile")
+    result = await direct_image_prompt(draft, visual)
+    return {"ok": True, "prompts": result}
+
+
+@app.post("/api/sessions/{session_id}/image-critique")
+async def image_critique(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    from .oc_image_critic import critique_image_prompt
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    critique = await critique_image_prompt(draft, body.get("prompt", ""), body.get("negative_prompt", ""))
+    return {"ok": True, "critique": critique}
+
+
 # ─── Image / Voice / Bridge ────────────────────────────
 
 @app.get("/api/bridge/health")
@@ -328,6 +359,49 @@ async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Dep
     result = await generate_character_image(draft, style, prompt=prompt, negative_prompt=negative_prompt)
     result["audit"] = audit
     return result
+
+
+@app.post("/api/sessions/{session_id}/image-candidates")
+async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    from .oc_image_gen import generate_character_image
+    _require_session_access(session_id, user)
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    styles = [
+        {"name": "anime portrait", "label": "动漫头像"},
+        {"name": "cinematic lighting", "label": "电影光影"},
+        {"name": "flat illustration", "label": "平面插画"},
+    ]
+    candidates = []
+    for i, s in enumerate(styles):
+        try:
+            result = await generate_character_image(draft, s["name"])
+            candidates.append({
+                "index": i, "label": s["label"], "style": s["name"],
+                "ok": result.get("ok", False),
+                "image_path": result.get("image_path", ""),
+                "prompt": result.get("prompt", ""),
+                "error": result.get("error", ""),
+            })
+        except Exception as e:
+            candidates.append({"index": i, "label": s["label"], "ok": False, "error": str(e)})
+    return {"ok": True, "candidates": candidates}
+
+
+@app.post("/api/sessions/{session_id}/visual-canon-lock")
+async def visual_canon_lock(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    _require_session_access(session_id, user)
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    from datetime import timezone as _tz
+    canon = {"selected_style": body.get("style", ""), "locked_prompt": body.get("prompt", ""),
+             "locked_at": datetime.now(_tz.utc).isoformat()}
+    draft.user_preferences.append(json.dumps(canon, ensure_ascii=False))
+    db.update_session_draft(session_id, draft)
+    return {"ok": True, "canon": canon}
 
 
 @app.get("/api/sessions/{session_id}/voice-profile")
@@ -441,6 +515,61 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
         return {"ok": False, "error": str(e)}
 
 
+@app.post("/api/sessions/{session_id}/voice-sample-candidates")
+async def voice_sample_candidates(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    """Generate 3 voice sample candidates with varying parameters for user selection."""
+    from .config import get_config, get_project_root
+    from .voice_providers.base import get_provider
+    _require_session_access(session_id, user)
+
+    cfg = get_config()
+    vc = cfg.get("voice", {})
+    provider_name = body.get("provider") or vc.get("provider", "elevenlabs")
+    el_cfg = cfg.get("voice", {}).get("elevenlabs", {})
+
+    profile = db.get_voice_profile(session_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found. Analyze first.")
+
+    text = body.get("text") or profile.get("sample_text", "你好。")
+    output_dir = get_project_root() / vc.get("output_dir", "exports/voices")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3 parameter variations
+    candidates = []
+    variations = [
+        {"stability": el_cfg.get("stability", 0.58), "similarity_boost": el_cfg.get("similarity_boost", 0.82), "label": "默认"},
+        {"stability": 0.75, "similarity_boost": 0.6, "label": "沉稳"},
+        {"stability": 0.3, "similarity_boost": 0.9, "label": "表现力"},
+    ]
+
+    for i, var in enumerate(variations):
+        # Create a temporary profile with this variation's settings
+        temp_profile = dict(profile)
+        temp_profile.setdefault("provider_hints", {})
+        temp_profile["provider_hints"]["el_stability"] = var["stability"]
+        temp_profile["provider_hints"]["el_similarity_boost"] = var["similarity_boost"]
+        output_path = str(output_dir / f"{session_id}_{provider_name}_c{i}.mp3")
+
+        try:
+            provider = get_provider(provider_name)
+            result_path = await provider.synthesize(text, temp_profile, output_path)
+            from pathlib import Path
+            candidates.append({
+                "index": i,
+                "label": var["label"],
+                "stability": var["stability"],
+                "similarity_boost": var["similarity_boost"],
+                "audio_url": "/exports/voices/" + Path(result_path).name,
+                "audio_path": result_path,
+            })
+            db.insert_voice_generation(session_id, f"{provider_name}_c{i}", text, json.dumps(temp_profile, ensure_ascii=False), result_path)
+        except Exception as e:
+            candidates.append({"index": i, "label": var["label"], "error": str(e)})
+
+    return {"ok": True, "candidates": candidates, "provider": provider_name}
+
+
 @app.post("/api/sessions/{session_id}/voice-reference")
 async def upload_voice_reference(
     session_id: str,
@@ -539,6 +668,66 @@ async def voice_options(user: dict[str, Any] = Depends(auth.current_user)):
         "fish_prompt_without_reference": fish_cfg.get("prompt_without_reference", True),
         "fish_voice_library": library,
     }
+
+
+@app.post("/api/voice-library/favorite")
+async def voice_library_favorite(body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    """Save a voice model reference_id to config.yaml voice_library."""
+    from pathlib import Path as _Path
+    import yaml
+
+    ref_id = (body.get("reference_id") or "").strip()
+    label = (body.get("label") or "收藏音色").strip()
+    profile_match = body.get("profile", {})
+
+    if not ref_id:
+        raise HTTPException(status_code=400, detail="reference_id is required")
+
+    config_path = get_project_root() / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    library = config.setdefault("voice", {}).setdefault("fish_audio", {}).setdefault("voice_library", [])
+    replaced = False
+    for entry in library:
+        if entry.get("reference_id") == ref_id:
+            entry["label"] = label
+            entry["profile"] = profile_match
+            replaced = True
+            break
+    if not replaced:
+        library.append({"reference_id": ref_id, "label": label, "profile": profile_match})
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
+
+    return {"ok": True, "reference_id": ref_id, "label": label}
+
+
+@app.post("/api/reference-audios")
+async def upload_reference_audio(label: str = Body(...), transcript: str | None = Body(None), audio: UploadFile = Body(...), user: dict[str, Any] = Depends(auth.current_user)):
+    """Upload a Chinese reference audio for voice cloning."""
+    from pathlib import Path as _Path
+    ref_dir = get_project_root() / "exports" / "references"
+    ref_dir.mkdir(parents=True, exist_ok=True)
+
+    uid = user["id"]
+    safe_label = "".join(c for c in label if c.isalnum() or c in "._- ")[:30]
+    ext = audio.filename.rsplit(".", 1)[-1] if audio.filename and "." in audio.filename else "mp3"
+    fname = f"ref_{uid}_{safe_label}.{ext}"
+    file_path = ref_dir / fname
+
+    content = await audio.read()
+    file_path.write_bytes(content)
+
+    db.insert_reference_audio(int(uid), label, str(file_path), transcript)
+    return {"ok": True, "file_path": str(file_path), "label": label}
+
+
+@app.get("/api/reference-audios")
+async def list_reference_audios(user: dict[str, Any] = Depends(auth.current_user)):
+    audios = db.get_reference_audios(int(user["id"]))
+    return {"ok": True, "audios": audios}
 
 
 # ─── Auth endpoints ───────────────────────────────────
