@@ -71,6 +71,14 @@ async def health():
     return {"ok": True, "service": "Mnemosyne Forge"}
 
 
+@app.post("/shutdown")
+async def shutdown(user: dict[str, Any] = Depends(auth.current_admin)):
+    """Gracefully shut down the server (admin only)."""
+    import os, signal
+    os.kill(os.getpid(), signal.SIGTERM)
+    return {"ok": True, "message": "Shutting down..."}
+
+
 # --- Sessions ---
 
 def _require_session_access(session_id: str, user: dict[str, Any]) -> None:
@@ -353,12 +361,50 @@ async def image_prompt_direct(session_id: str, body: dict, user: dict[str, Any] 
 @app.post("/api/sessions/{session_id}/image-critique")
 async def image_critique(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_image_critic import critique_image_prompt
-    _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
     critique = await critique_image_prompt(draft, body.get("prompt", ""), body.get("negative_prompt", ""))
     return {"ok": True, "critique": critique}
+
+
+@app.post("/api/dialogue-performance")
+async def dialogue_performance(body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    from .oc_dialogue_performance import analyze_performance
+    draft = None
+    session_id = body.get("session_id")
+    if session_id:
+        draft = await oc_session.get_session_draft(str(session_id))
+    result = await analyze_performance(body.get("text", ""), draft)
+    return {"ok": True, "performance": result}
+
+
+@app.post("/api/migrate-voice-profiles")
+async def migrate_voice_profiles(user: dict[str, Any] = Depends(auth.current_user)):
+    """Clean up legacy Fish provider hints when ElevenLabs is the default."""
+    cfg = get_config()
+    if cfg.get("voice", {}).get("provider") != "elevenlabs":
+        return {"ok": True, "migrated": 0, "note": "Default provider is not elevenlabs, no migration needed"}
+
+    sessions = db.list_sessions()
+    migrated = 0
+    for s in sessions:
+        sid = s["id"]
+        profile = db.get_voice_profile(sid)
+        if not profile:
+            continue
+        hints = profile.get("provider_hints", {})
+        changed = False
+        # Remove legacy Fish fields if present
+        for key in list(hints.keys()):
+            if key.startswith("fish_") and key != "fish_reference_id":
+                del hints[key]
+                changed = True
+        if changed:
+            db.save_voice_profile(sid, json.dumps(profile, ensure_ascii=False))
+            migrated += 1
+
+    return {"ok": True, "migrated": migrated}
 
 
 # ─── Image / Voice / Bridge ────────────────────────────
@@ -429,50 +475,51 @@ async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Dep
 @app.post("/api/sessions/{session_id}/image-candidates")
 async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_image_gen import generate_character_image
+    from .oc_visual_identity import analyze_visual_identity
+    from .oc_image_prompt_director import direct_image_prompt
+    from .oc_image_critic import critique_image_prompt
     from pathlib import Path
     _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    styles = [
-        {"name": "anime portrait", "label": "动漫头像"},
-        {"name": "cinematic lighting", "label": "电影光影"},
-        {"name": "flat illustration", "label": "平面插画"},
-    ]
+    # Use Visual Identity + Prompt Director for structured prompts
+    visual = await analyze_visual_identity(draft)
+    directed = await direct_image_prompt(draft, visual)
+    variations = directed.get("variations", [])
+    if not variations:
+        variations = [
+            {"style": "anime character key visual", "positive_prompt": directed.get("positive_prompt", "")},
+            {"style": "anime portrait cinematic rim light", "positive_prompt": directed.get("positive_prompt", "")},
+            {"style": "game character concept art", "positive_prompt": directed.get("positive_prompt", "")},
+        ]
+
     candidates = []
-    for i, s in enumerate(styles):
+    for i, v in enumerate(variations[:3]):
         try:
-            result = await generate_character_image(draft, s["name"])
+            result = await generate_character_image(draft, v.get("style", "anime"), prompt=v.get("positive_prompt", ""))
+            critique = await critique_image_prompt(draft, v.get("positive_prompt", ""), v.get("negative_prompt", ""))
+            image_url = ""
             asset_id = None
             if result.get("ok") and result.get("image_path"):
                 image_url = "/exports/images/" + Path(result["image_path"]).name
-                asset_id = db.insert_asset(
-                    session_id,
-                    "image_candidate",
-                    "stability",
-                    result["image_path"],
-                    {
-                        "index": i,
-                        "label": s["label"],
-                        "style": s["name"],
-                        "prompt": result.get("prompt", ""),
-                        "negative_prompt": result.get("negative_prompt", ""),
-                        "seed": result.get("seed"),
-                        "source": "image_candidates",
-                    },
-                )
+                asset_id = db.insert_asset(session_id, "image_candidate", "stability", result["image_path"],
+                    {"index": i, "style": v.get("style", ""), "prompt": v.get("positive_prompt", "")})
             candidates.append({
-                "index": i, "label": s["label"], "style": s["name"],
+                "index": i, "label": v.get("style", "游戏立绘").replace("anime character key visual", "动漫精绘").replace("anime portrait cinematic rim light", "电影感").replace("game character concept art", "游戏立绘"),
+                "style": v.get("style", ""),
                 "ok": result.get("ok", False),
                 "image_path": result.get("image_path", ""),
-                "image_url": image_url if result.get("ok") and result.get("image_path") else "",
+                "image_url": image_url,
                 "asset_id": asset_id,
-                "prompt": result.get("prompt", ""),
+                "prompt": v.get("positive_prompt", ""),
+                "negative_prompt": v.get("negative_prompt", ""),
                 "error": result.get("error", ""),
+                "critique": critique,
             })
         except Exception as e:
-            candidates.append({"index": i, "label": s["label"], "ok": False, "error": str(e)})
+            candidates.append({"index": i, "label": v.get("style", ""), "ok": False, "error": str(e), "critique": None})
     return {"ok": True, "candidates": candidates}
 
 
@@ -732,6 +779,15 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
             ]
 
     text = body.get("text") or profile.get("sample_text", "你好。")
+
+    try:
+        from .oc_dialogue_performance import analyze_performance
+        draft = await oc_session.get_session_draft(session_id)
+        performance = await analyze_performance(text, draft)
+        profile["last_performance"] = performance
+    except Exception:
+        pass
+
     output_dir = get_project_root() / vc.get("output_dir", "exports/voices")
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = str(output_dir / f"{session_id}_{provider_name}.mp3")
@@ -991,7 +1047,10 @@ async def upload_voice_reference(
 
     ext = Path(file.filename or "reference.mp3").suffix.lower() or ".mp3"
     if ext not in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}:
-        raise HTTPException(status_code=400, detail="Unsupported audio format")
+        raise HTTPException(status_code=400, detail=f"不支持的音频格式: {ext}。支持: mp3, wav, m4a, aac, ogg, flac")
+    mime = file.content_type or ""
+    if mime and not any(mime.startswith(t) for t in ("audio/", "application/octet-stream")):
+        raise HTTPException(status_code=400, detail=f"非音频文件: {mime}")
     if not transcript.strip():
         raise HTTPException(status_code=400, detail="transcript is required")
 

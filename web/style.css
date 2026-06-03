@@ -938,6 +938,8 @@ html, body {
 
 .image-loading,
 .image-empty,
+.image-critique { font-size: 11px; color: var(--text-muted); padding: 4px 0; text-align: center; }
+
 .image-error {
   padding: 24px;
   color: var(--text-muted);
@@ -1084,6 +1086,8 @@ html, body {
   font-size: 12px;
   line-height: 1.5;
 }
+
+.voice-advanced.hidden { display: none; }
 
 .voice-edit-section {
   margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border-light);
@@ -1265,6 +1269,10 @@ html, body {
 }
 
 /* Stage */
+.draft-assets { padding: 8px 0; margin-bottom: 8px; border-bottom: 1px solid var(--border-light); }
+.draft-assets.hidden { display: none; }
+.asset-badge { display: inline-block; padding: 2px 8px; background: var(--accent-light); border-radius: 10px; font-size: 11px; color: var(--accent); margin-right: 4px; }
+
 .draft-stage {
   margin-top: 14px;
 }

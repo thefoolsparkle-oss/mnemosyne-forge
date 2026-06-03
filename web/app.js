@@ -73,6 +73,25 @@
     }, 3500);
   }
 
+  function wireExclusiveAudio(root) {
+    (root || document).querySelectorAll('audio').forEach(function(audio) {
+      if (audio.dataset.exclusiveWired === '1') return;
+      audio.dataset.exclusiveWired = '1';
+      audio.addEventListener('play', function() {
+        document.querySelectorAll('audio').forEach(function(other) {
+          if (other !== audio && !other.paused) other.pause();
+        });
+      });
+    });
+  }
+
+  document.addEventListener('play', function(e) {
+    if (!e.target || e.target.tagName !== 'AUDIO') return;
+    document.querySelectorAll('audio').forEach(function(other) {
+      if (other !== e.target && !other.paused) other.pause();
+    });
+  }, true);
+
   // ─── Error display ───────────────────────────────────
   function showError(el, message) {
     el.textContent = message;
@@ -198,6 +217,7 @@
 
   function updateDraftPanel(draft) {
     state.draft = draft;
+    loadDraftAssets();
     $$('.draft-field').forEach(function (el) {
       const field = el.dataset.field;
       const valueEl = el.querySelector('.field-value');
@@ -374,6 +394,27 @@
       notesSection.classList.add('hidden');
     }
     cardOverlay.classList.remove('hidden');
+
+    // Show selected assets if available
+    var extensions = data.extensions || {};
+    var selectedAssets = extensions.mnemosyne_forge && extensions.mnemosyne_forge.selected_assets;
+    if (selectedAssets) {
+      var assetSection = document.getElementById('card-assets-section');
+      if (!assetSection) {
+        assetSection = document.createElement('div');
+        assetSection.id = 'card-assets-section';
+        assetSection.className = 'card-section';
+        assetSection.innerHTML = '<h4>绑定资产</h4><div id="card-assets"></div>';
+        var cardBody = document.querySelector('.card-body');
+        if (cardBody) cardBody.appendChild(assetSection);
+      }
+      var assetsEl = document.getElementById('card-assets');
+      var assetHtml = '';
+      if (selectedAssets.image) assetHtml += '<p>立绘: 已锁定</p>';
+      if (selectedAssets.voice_identity) assetHtml += '<p>声音: ' + (selectedAssets.voice_identity.voice_id ? '已锁定' : '未锁定') + '</p>';
+      assetsEl.innerHTML = assetHtml || '<p style="color:var(--text-muted)">暂无绑定资产</p>';
+      assetSection.classList.remove('hidden');
+    }
   }
 
   function hideCardPreview() {
@@ -669,6 +710,7 @@
       html += '</div></section>';
     });
     assetContent.innerHTML = html;
+    wireExclusiveAudio(assetContent);
 
     assetContent.querySelectorAll('.asset-lock-image').forEach(function(btn) {
       btn.addEventListener('click', async function() {
@@ -778,8 +820,17 @@
       html += '<div class="image-candidate-title">' + escapeHtml(c.label || ('\u5019\u9009 ' + c.index)) + '</div>';
       if (c.image_url) {
         html += '<img src="' + escapeAttr(c.image_url) + '" alt="' + escapeAttr(c.label || 'image candidate') + '">';
+        if (c.critique && c.critique.overall_score) {
+          html += '<div class="image-critique">评分: ' + Math.round(c.critique.overall_score) + '/10';
+          if (c.critique.passed === false) html += ' <span style="color:var(--error)">未通过</span>';
+          html += '</div>';
+        }
       } else {
-        html += '<div class="image-error">' + escapeHtml(c.error || '\u751f\u6210\u5931\u8d25') + '</div>';
+        html += '<div class="image-error">';
+        html += '<strong>' + escapeHtml(c.label || '生成失败') + '</strong><br>';
+        html += escapeHtml(c.error || '未知错误') + '<br>';
+        html += '<button class="btn-adopt-idea image-retry-btn" data-style="' + escapeAttr(c.style || '') + '">重试此风格</button>';
+        html += '</div>';
       }
       html += '<div class="image-candidate-actions">';
       if (c.asset_id) {
@@ -802,6 +853,16 @@
             prompt: this.dataset.prompt || '',
           });
           showToast(data.ok ? '\u5df2\u9501\u5b9a\u89d2\u8272\u89c6\u89c9 canon' : '\u9501\u5b9a\u5931\u8d25', data.ok ? 'success' : 'error');
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    });
+    imageContent.querySelectorAll('.image-retry-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        var style = this.dataset.style;
+        showToast('正在重试「' + escapeHtml(style) + '」风格……', 'success');
+        try {
+          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', { style: style });
+          renderImageCandidates(data.candidates || []);
         } catch(e) { showToast(e.message, 'error'); }
       });
     });
@@ -869,20 +930,20 @@
     if (!state.sessionId) return;
     try {
       var providerEl = document.getElementById('voice-provider-select');
-      var refEl = document.getElementById('voice-edit-ref');
-      var provider = providerEl ? providerEl.value : ((voiceOptions && voiceOptions.default_provider) || 'edge_tts');
-      var refId = refEl ? refEl.value.trim() : '';
-      var prefixEl = document.getElementById('voice-fish-prefix');
-      var speedEl = document.getElementById('voice-fish-speed');
-      var volumeEl = document.getElementById('voice-fish-volume');
+      var provider = providerEl ? providerEl.value : ((voiceOptions && voiceOptions.default_provider) || 'elevenlabs');
       var body = { provider: provider };
-      body.provider_hints = {};
-      if (refId) body.provider_hints.fish_reference_id = refId;
-      body.fish_tts_directive = { text_prefix: prefixEl ? prefixEl.value.trim() : '', prosody: { speed: speedEl ? Number(speedEl.value) : 0.9, volume: volumeEl ? Number(volumeEl.value) : -3 } };
+      // Pass reference_id if set (for Fish Audio)
+      var refEl = document.getElementById('voice-edit-ref');
+      if (refEl && refEl.value.trim()) {
+        body.provider_hints = { fish_reference_id: refEl.value.trim() };
+      }
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample', body);
       if (data.ok) {
         var player = voiceContent.querySelector('.voice-sample-player');
-        if (player) player.innerHTML = '<audio controls src="' + escapeAttr(data.audio_url || data.audio_path) + '"></audio>';
+        if (player) {
+          player.innerHTML = '<audio controls src="' + escapeAttr(data.audio_url || data.audio_path) + '"></audio>';
+          wireExclusiveAudio(player);
+        }
         showToast('试听已生成', 'success');
       } else {
         showToast(data.error || '生成失败', 'error');
@@ -894,7 +955,11 @@
     if (!state.sessionId) return;
     voiceContent.innerHTML = '<div class="voice-loading">生成三候选音色…</div>';
     try {
-      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates', {});
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates', { provider: 'elevenlabs' });
+      if (!data.ok) {
+        voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">三候选生成失败：' + escapeHtml(data.error || '未知错误') + '</div><div class="voice-summary">请确认 ElevenLabs API Key 有效且有可用额度，然后重试。</div>';
+        return;
+      }
       renderVoiceCandidates(data.candidates || [], data.provider || 'elevenlabs');
     } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>'; }
   });
@@ -914,6 +979,7 @@
     });
     html += '</div>';
     voiceContent.innerHTML = html;
+    wireExclusiveAudio(voiceContent);
     voiceContent.querySelectorAll('.voice-select-candidate').forEach(function(btn) {
       btn.addEventListener('click', async function() {
         try {
@@ -925,15 +991,19 @@
     });
   }
 
+  $('#btn-voice-advanced-toggle').addEventListener('click', function() {
+    var adv = $('#voice-advanced');
+    var hidden = adv.classList.toggle('hidden');
+    this.textContent = hidden ? '\u25B8 \u9AD8\u7EA7\uFF1AFish Audio / \u53C2\u8003\u97F3\u9891' : '\u25BE \u9AD8\u7EA7\uFF1AFish Audio / \u53C2\u8003\u97F3\u9891';
+  });
+
   $('#btn-voice-cast').addEventListener('click', async function() {
     if (!state.sessionId) return;
+    voiceContent.innerHTML = '<div class="voice-loading">正在生成专属音色……</div>';
     try {
-      voiceContent.innerHTML = '<div class="voice-loading">正在匹配 Fish 音色底座…</div>';
-      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-cast', { limit: 8 });
-      if (data.voice_profile) renderVoiceProfile(data.voice_profile);
-      renderVoiceCastResult(data);
-      if (data.recommendation) showToast('已锁定音色: ' + data.recommendation.title, 'success');
-      else showToast(data.warning || '没有找到高可信中文音色底座', 'error');
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates', { provider: 'elevenlabs' });
+      renderVoiceCandidates(data.candidates || [], data.provider || 'elevenlabs');
+      if (data.ok === false) showToast(data.error || '生成失败', 'error');
     } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>'; }
   });
 
@@ -963,8 +1033,8 @@
       voiceOptions = await apiCall('GET', '/api/voice-options');
     } catch(e) {
       voiceOptions = {
-        default_provider: 'edge_tts',
-        providers: ['edge_tts', 'fish_audio'],
+        default_provider: 'elevenlabs',
+        providers: ['elevenlabs', 'edge_tts', 'fish_audio'],
         fish_requires_reference_id: false,
         fish_prompt_without_reference: true,
         fish_voice_library: [],
@@ -992,7 +1062,11 @@
     var hints = vp.provider_hints || {};
     var directive = hints.fish_tts_directive || vp.fish_tts_directive || {};
     var prosody = directive.prosody || {};
-    var provider = hints.provider || (voiceOptions && voiceOptions.default_provider) || 'edge_tts';
+    var defaultProvider = (voiceOptions && voiceOptions.default_provider) || 'elevenlabs';
+    var provider = defaultProvider;
+    if (hints.elevenlabs_voice_id) provider = 'elevenlabs';
+    else if (hints.provider && hints.provider !== 'fish_audio') provider = hints.provider;
+    else if (hints.provider && defaultProvider !== 'elevenlabs') provider = hints.provider;
     var library = (voiceOptions && voiceOptions.fish_voice_library) || [];
     html += '<div class="voice-provider-section"><label>试听引擎</label><select id="voice-provider-select" class="voice-select">';
     var providerLabels = { elevenlabs: 'ElevenLabs（专属音色 / 中文 TTS）', edge_tts: 'Edge TTS（按性别/音高自动匹配）', fish_audio: 'Fish Audio（reference_id / 参考音频）' };
@@ -1093,6 +1167,32 @@
       this.style.height = Math.min(this.scrollHeight, 150) + 'px';
     });
   });
+
+  // Load locked assets into draft panel
+  async function loadDraftAssets() {
+    if (!state.sessionId) return;
+    try {
+      var data = await apiCall('GET', '/api/sessions/' + state.sessionId + '/assets');
+      var assets = data.assets || [];
+      var locked = assets.filter(function(a) { return a.selected; });
+      if (!locked.length) return;
+      var summary = '';
+      locked.forEach(function(a) {
+        var label = a.asset_type === 'image_locked' ? '立绘' : a.asset_type === 'voice_identity' ? '声音' : '';
+        if (label) summary += '<span class="asset-badge">' + label + '</span> ';
+      });
+      var el = document.getElementById('draft-assets');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'draft-assets';
+        el.className = 'draft-assets';
+        var draftContent = document.getElementById('draft-content');
+        if (draftContent) draftContent.appendChild(el);
+      }
+      el.innerHTML = summary || '';
+      el.classList.toggle('hidden', !summary);
+    } catch(e) {}
+  }
 
   // ─── Search ──────────────────────────────────────────
   btnSearch.addEventListener('click', function() {

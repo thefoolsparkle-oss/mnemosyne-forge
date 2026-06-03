@@ -120,6 +120,7 @@ async def generate_character_image(
     cfg = get_config()
     img_cfg = cfg.get("image", {})
     api_key = read_env(img_cfg.get("api_key_env", ""))
+    style = _normalize_character_style(style)
 
     if not api_key:
         prompt = prompt or await build_image_prompt(draft, style)
@@ -137,15 +138,19 @@ async def generate_character_image(
     # Call Stability AI
     try:
         model = img_cfg.get("model", "sd3.5-large")
-        url = "https://api.stability.ai/v2beta/stable-image/generate/core"
+        if str(model).startswith("sd3"):
+            url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
+        else:
+            url = "https://api.stability.ai/v2beta/stable-image/generate/core"
 
         fields = {
             "prompt": prompt,
             "negative_prompt": negative_prompt,
             "output_format": "png",
             "aspect_ratio": img_cfg.get("aspect_ratio", "1:1"),
-            "model": model,
         }
+        if str(model).startswith("sd3"):
+            fields["model"] = model
 
         async with httpx.AsyncClient(timeout=60.0) as client:
             resp = await client.post(
@@ -158,9 +163,9 @@ async def generate_character_image(
             )
 
         if resp.status_code == 401 or resp.status_code == 403:
-            return {"ok": False, "error": "Stability API Key 无效或权限不足", "prompt": prompt}
+            return {"ok": False, "error": f"Stability API auth/permission failed ({resp.status_code}): {resp.text[:300]}", "prompt": prompt}
         if resp.status_code != 200:
-            return {"ok": False, "error": f"Stability API 返回错误 {resp.status_code}", "prompt": prompt}
+            return {"ok": False, "error": f"Stability API returned {resp.status_code}: {resp.text[:500]}", "prompt": prompt}
 
         data = resp.json()
         image_b64 = data.get("image", "")
@@ -188,3 +193,16 @@ async def generate_character_image(
 
     except Exception as e:
         return {"ok": False, "error": f"生图失败: {e}", "prompt": prompt}
+
+
+def _normalize_character_style(style: str) -> str:
+    """Keep first-pass OC candidates in useful character-portrait styles."""
+    raw = (style or "").strip()
+    lowered = raw.lower()
+    if "flat" in lowered or "illustration" in lowered:
+        return "high-detail game character concept art, polished anime rendering, expressive eyes"
+    if lowered in {"anime", "anime portrait"}:
+        return "premium anime character key visual, detailed face, layered painterly lighting"
+    if "cinematic" in lowered:
+        return "anime character portrait, cinematic rim light, dramatic library atmosphere"
+    return raw or "premium anime character key visual, detailed face, layered painterly lighting"

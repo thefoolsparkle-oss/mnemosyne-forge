@@ -256,15 +256,18 @@
         </div>
         <div class="voice-panel-buttons">
           <button id="btn-voice-analyze" class="btn-search-go">分析声线</button>
-          <button id="btn-voice-cast" class="btn-draft-action">匹配音色</button>
-          <button id="btn-voice-generate" class="btn-draft-action">生成试听</button>
-          <button id="btn-voice-candidates" class="btn-draft-action">三候选对比</button>
-        </div>
-        <div class="voice-reference-upload">
+        <button id="btn-voice-cast" class="btn-draft-action">生成专属音色</button>
+        <button id="btn-voice-candidates" class="btn-draft-action">三候选对比</button>
+        <button id="btn-voice-generate" class="btn-draft-action">生成试听</button>
+      </div>
+      <button id="btn-voice-advanced-toggle" class="btn-draft-action" style="width:100%;margin-top:6px">▸ 高级：Fish Audio / 参考音频</button>
+      <div id="voice-advanced" class="voice-advanced hidden">
+      <div class="voice-reference-upload">
           <input id="voice-ref-file" type="file" accept="audio/*">
           <textarea id="voice-ref-transcript" rows="2" placeholder="参考音频逐字稿，必须和音频内容一致"></textarea>
           <button id="btn-voice-ref-upload" class="btn-draft-action">绑定参考音频</button>
         </div>
+      </div>
         <div id="voice-content" class="voice-content">
           <div class="voice-loading">点击“分析声线”开始</div>
         </div>
