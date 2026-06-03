@@ -93,6 +93,17 @@ def init_db() -> None:
                 FOREIGN KEY(session_id) REFERENCES sessions(id)
             );
 
+            CREATE TABLE IF NOT EXISTS voice_references (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                audio_path TEXT NOT NULL,
+                transcript TEXT NOT NULL,
+                label TEXT,
+                provider TEXT NOT NULL DEFAULT 'fish_audio',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
+            );
+
             CREATE TABLE IF NOT EXISTS reference_audios (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -102,6 +113,18 @@ def init_db() -> None:
                 language TEXT NOT NULL DEFAULT 'zh',
                 transcript TEXT,
                 created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS assets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                asset_type TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                path TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                selected INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(session_id) REFERENCES sessions(id)
             );
         """)
         # Migration: add user_id if missing
@@ -227,6 +250,7 @@ def delete_session(session_id: str) -> bool:
     conn = _get_conn()
     try:
         conn.execute("DELETE FROM search_runs WHERE session_id = ?", (session_id,))
+        conn.execute("DELETE FROM assets WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM voice_generations WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM voice_references WHERE session_id = ?", (session_id,))
         conn.execute("DELETE FROM voice_profiles WHERE session_id = ?", (session_id,))
@@ -392,5 +416,108 @@ def get_reference_audios(user_id: int) -> list[dict]:
             (user_id,),
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def insert_asset(
+    session_id: str,
+    asset_type: str,
+    provider: str,
+    path: str,
+    metadata: dict | None = None,
+    selected: bool = False,
+) -> int:
+    created_at = datetime.now(timezone.utc).isoformat()
+    metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+    conn = _get_conn()
+    try:
+        if selected:
+            conn.execute(
+                "UPDATE assets SET selected = 0 WHERE session_id = ? AND asset_type = ?",
+                (session_id, asset_type),
+            )
+        cursor = conn.execute(
+            "INSERT INTO assets (session_id, asset_type, provider, path, metadata_json, selected, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (session_id, asset_type, provider, path, metadata_json, 1 if selected else 0, created_at),
+        )
+        conn.commit()
+        return int(cursor.lastrowid)
+    finally:
+        conn.close()
+
+
+def list_assets(session_id: str, asset_type: str | None = None, selected: bool | None = None) -> list[dict]:
+    conn = _get_conn()
+    try:
+        clauses = ["session_id = ?"]
+        params: list = [session_id]
+        if asset_type:
+            clauses.append("asset_type = ?")
+            params.append(asset_type)
+        if selected is not None:
+            clauses.append("selected = ?")
+            params.append(1 if selected else 0)
+        rows = conn.execute(
+            f"SELECT * FROM assets WHERE {' AND '.join(clauses)} ORDER BY id DESC",
+            params,
+        ).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            try:
+                item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+            except Exception:
+                item["metadata"] = {}
+            item["selected"] = bool(item["selected"])
+            result.append(item)
+        return result
+    finally:
+        conn.close()
+
+
+def select_asset(asset_id: int, session_id: str, asset_type: str | None = None) -> dict | None:
+    conn = _get_conn()
+    try:
+        row = conn.execute(
+            "SELECT * FROM assets WHERE id = ? AND session_id = ?",
+            (asset_id, session_id),
+        ).fetchone()
+        if row is None:
+            return None
+        resolved_type = asset_type or row["asset_type"]
+        conn.execute(
+            "UPDATE assets SET selected = 0 WHERE session_id = ? AND asset_type = ?",
+            (session_id, resolved_type),
+        )
+        conn.execute(
+            "UPDATE assets SET selected = 1 WHERE id = ? AND session_id = ?",
+            (asset_id, session_id),
+        )
+        conn.commit()
+        item = dict(row)
+        item["selected"] = True
+        try:
+            item["metadata"] = json.loads(item.pop("metadata_json") or "{}")
+        except Exception:
+            item["metadata"] = {}
+        return item
+    finally:
+        conn.close()
+
+
+def delete_assets(session_id: str, asset_ids: list[int]) -> int:
+    if not asset_ids:
+        return 0
+    placeholders = ",".join("?" for _ in asset_ids)
+    conn = _get_conn()
+    try:
+        cursor = conn.execute(
+            f"DELETE FROM assets WHERE session_id = ? AND id IN ({placeholders})",
+            [session_id, *asset_ids],
+        )
+        conn.commit()
+        return int(cursor.rowcount)
     finally:
         conn.close()

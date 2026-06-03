@@ -6,6 +6,8 @@ Serves the web frontend at root path and API endpoints under /api/.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
@@ -81,6 +83,47 @@ def _forge_user_id(user: dict[str, Any]) -> int:
     return int(user.get("forge_user_id") or user["id"])
 
 
+def _safe_asset_file_cleanup(assets: list[dict], protected_paths: set[str] | None = None) -> dict[str, Any]:
+    project_root = get_project_root().resolve()
+    allowed_roots = [
+        (project_root / "exports").resolve(),
+        (project_root / "data" / "voice_references").resolve(),
+    ]
+    protected_paths = protected_paths or set()
+    result: dict[str, Any] = {"deleted_files": [], "kept_files": [], "skipped": []}
+
+    for asset in assets:
+        raw_path = str(asset.get("path") or "").strip()
+        if not raw_path:
+            result["skipped"].append({"asset_id": asset.get("id"), "reason": "empty_path"})
+            continue
+        if raw_path in protected_paths:
+            result["kept_files"].append(raw_path)
+            continue
+        if raw_path.startswith(("http://", "https://")):
+            result["skipped"].append({"asset_id": asset.get("id"), "path": raw_path, "reason": "remote_path"})
+            continue
+
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = project_root / path
+        resolved = path.resolve(strict=False)
+        if not any(resolved == root or root in resolved.parents for root in allowed_roots):
+            result["skipped"].append({"asset_id": asset.get("id"), "path": raw_path, "reason": "outside_allowed_roots"})
+            continue
+        if not resolved.exists() or not resolved.is_file():
+            result["skipped"].append({"asset_id": asset.get("id"), "path": raw_path, "reason": "not_found"})
+            continue
+
+        try:
+            resolved.unlink()
+            result["deleted_files"].append(str(resolved))
+        except OSError as exc:
+            result["skipped"].append({"asset_id": asset.get("id"), "path": raw_path, "reason": str(exc)})
+
+    return result
+
+
 @app.post("/api/sessions")
 async def create_session(body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     initial_idea = body.get("initial_idea", "").strip()
@@ -124,10 +167,12 @@ async def resume_session(session_id: str, user: dict[str, Any] = Depends(auth.cu
 @app.delete("/api/sessions/{session_id}")
 async def delete_session(session_id: str, user: dict[str, Any] = Depends(auth.current_user)):
     _require_session_access(session_id, user)
+    assets = db.list_assets(session_id)
     deleted = db.delete_session(session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
-    return {"ok": True}
+    cleanup = _safe_asset_file_cleanup(assets)
+    return {"ok": True, "cleanup": cleanup}
 
 
 @app.get("/api/sessions/{session_id}/draft")
@@ -285,6 +330,7 @@ async def generate_world(session_id: str, user: dict[str, Any] = Depends(auth.cu
 @app.get("/api/sessions/{session_id}/visual-identity")
 async def visual_identity(session_id: str, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_visual_identity import analyze_visual_identity
+    _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -295,6 +341,7 @@ async def visual_identity(session_id: str, user: dict[str, Any] = Depends(auth.c
 @app.post("/api/sessions/{session_id}/image-prompt-direct")
 async def image_prompt_direct(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_image_prompt_director import direct_image_prompt
+    _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -306,6 +353,7 @@ async def image_prompt_direct(session_id: str, body: dict, user: dict[str, Any] 
 @app.post("/api/sessions/{session_id}/image-critique")
 async def image_critique(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_image_critic import critique_image_prompt
+    _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -348,6 +396,7 @@ async def image_prompt(session_id: str, style: str = "anime portrait", user: dic
 async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_image_gen import generate_character_image, build_image_prompt
     from .oc_prompt_auditor import audit_image_prompt
+    from pathlib import Path
     _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
@@ -358,12 +407,29 @@ async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Dep
     audit = await audit_image_prompt(draft, prompt, negative_prompt)
     result = await generate_character_image(draft, style, prompt=prompt, negative_prompt=negative_prompt)
     result["audit"] = audit
+    if result.get("ok") and result.get("image_path"):
+        result["image_url"] = "/exports/images/" + Path(result["image_path"]).name
+        result["asset_id"] = db.insert_asset(
+            session_id,
+            "image_candidate",
+            "stability",
+            result["image_path"],
+            {
+                "style": style,
+                "prompt": result.get("prompt", ""),
+                "negative_prompt": result.get("negative_prompt", ""),
+                "seed": result.get("seed"),
+                "audit": audit,
+                "source": "single_image",
+            },
+        )
     return result
 
 
 @app.post("/api/sessions/{session_id}/image-candidates")
 async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_image_gen import generate_character_image
+    from pathlib import Path
     _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
@@ -378,10 +444,30 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
     for i, s in enumerate(styles):
         try:
             result = await generate_character_image(draft, s["name"])
+            asset_id = None
+            if result.get("ok") and result.get("image_path"):
+                image_url = "/exports/images/" + Path(result["image_path"]).name
+                asset_id = db.insert_asset(
+                    session_id,
+                    "image_candidate",
+                    "stability",
+                    result["image_path"],
+                    {
+                        "index": i,
+                        "label": s["label"],
+                        "style": s["name"],
+                        "prompt": result.get("prompt", ""),
+                        "negative_prompt": result.get("negative_prompt", ""),
+                        "seed": result.get("seed"),
+                        "source": "image_candidates",
+                    },
+                )
             candidates.append({
                 "index": i, "label": s["label"], "style": s["name"],
                 "ok": result.get("ok", False),
                 "image_path": result.get("image_path", ""),
+                "image_url": image_url if result.get("ok") and result.get("image_path") else "",
+                "asset_id": asset_id,
                 "prompt": result.get("prompt", ""),
                 "error": result.get("error", ""),
             })
@@ -390,18 +476,166 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
     return {"ok": True, "candidates": candidates}
 
 
+@app.post("/api/sessions/{session_id}/image-variations")
+async def image_variations(session_id: str, body: dict | None = None, user: dict[str, Any] = Depends(auth.current_user)):
+    from .oc_image_gen import build_image_variation_prompt, generate_character_image
+    _require_session_access(session_id, user)
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    locked = next(iter(db.list_assets(session_id, asset_type="image_locked", selected=True)), None)
+    if locked is None:
+        locked = next(iter(db.list_assets(session_id, asset_type="image_locked")), None)
+    if locked is None:
+        raise HTTPException(status_code=400, detail="No locked visual canon. Generate and lock an image first.")
+
+    locked_meta = locked.get("metadata", {})
+    locked_prompt = locked_meta.get("locked_prompt") or locked_meta.get("prompt") or ""
+    negative_prompt = locked_meta.get("negative_prompt") or "low quality, blurry, ugly, deformed, bad anatomy, extra fingers, missing fingers, watermark, text, logo, signature"
+    requests = (body or {}).get("variations") or [
+        {"name": "expression", "label": "表情变体", "request": "same character, gentle new expression, half body portrait, consistent outfit"},
+        {"name": "pose", "label": "姿势变体", "request": "same character, different upper body pose, dynamic but restrained composition"},
+        {"name": "scene", "label": "场景变体", "request": "same character, same design, new background atmosphere that matches the character story"},
+    ]
+
+    candidates = []
+    for i, item in enumerate(requests):
+        label = item.get("label") or item.get("name") or f"Variation {i + 1}"
+        variation_request = item.get("request") or label
+        try:
+            prompt = await build_image_variation_prompt(
+                draft,
+                locked_prompt,
+                variation_request,
+                item.get("style") or locked_meta.get("selected_style") or "anime portrait",
+            )
+            result = await generate_character_image(
+                draft,
+                item.get("style") or locked_meta.get("selected_style") or "anime portrait",
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+            )
+            asset_id = None
+            image_url = ""
+            if result.get("ok") and result.get("image_path"):
+                image_url = "/exports/images/" + Path(result["image_path"]).name
+                asset_id = db.insert_asset(
+                    session_id,
+                    "image_candidate",
+                    "stability",
+                    result["image_path"],
+                    {
+                        "index": i,
+                        "label": label,
+                        "style": item.get("style") or locked_meta.get("selected_style") or "anime portrait",
+                        "prompt": result.get("prompt", ""),
+                        "negative_prompt": result.get("negative_prompt", ""),
+                        "seed": result.get("seed"),
+                        "source": "image_variations",
+                        "parent_asset_id": locked.get("id"),
+                        "parent_image_path": locked.get("path"),
+                        "variation_request": variation_request,
+                    },
+                )
+            candidates.append({
+                "index": i,
+                "label": label,
+                "style": item.get("style") or locked_meta.get("selected_style") or "anime portrait",
+                "ok": result.get("ok", False),
+                "image_path": result.get("image_path", ""),
+                "image_url": image_url,
+                "asset_id": asset_id,
+                "prompt": result.get("prompt", ""),
+                "error": result.get("error", ""),
+                "parent_asset_id": locked.get("id"),
+            })
+        except Exception as e:
+            candidates.append({"index": i, "label": label, "ok": False, "error": str(e), "parent_asset_id": locked.get("id")})
+
+    return {"ok": True, "parent_asset": locked, "candidates": candidates}
+
+
 @app.post("/api/sessions/{session_id}/visual-canon-lock")
 async def visual_canon_lock(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
-    from datetime import timezone as _tz
-    canon = {"selected_style": body.get("style", ""), "locked_prompt": body.get("prompt", ""),
-             "locked_at": datetime.now(_tz.utc).isoformat()}
+    asset = None
+    if body.get("asset_id"):
+        asset = db.select_asset(int(body["asset_id"]), session_id, "image_candidate")
+        if asset is None:
+            raise HTTPException(status_code=404, detail="Asset not found")
+    image_path = body.get("image_path") or (asset or {}).get("path", "")
+    asset_meta = (asset or {}).get("metadata", {})
+    canon = {
+        "selected_style": body.get("style") or asset_meta.get("style", ""),
+        "locked_prompt": body.get("prompt") or asset_meta.get("prompt", ""),
+        "negative_prompt": body.get("negative_prompt") or asset_meta.get("negative_prompt", ""),
+        "seed": body.get("seed") or asset_meta.get("seed"),
+        "image_path": image_path,
+        "asset_id": body.get("asset_id"),
+        "locked_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if image_path:
+        canon["locked_asset_id"] = db.insert_asset(
+            session_id,
+            "image_locked",
+            "stability",
+            image_path,
+            canon,
+            selected=True,
+        )
     draft.user_preferences.append(json.dumps(canon, ensure_ascii=False))
     db.update_session_draft(session_id, draft)
     return {"ok": True, "canon": canon}
+
+
+@app.get("/api/sessions/{session_id}/assets")
+async def session_assets(
+    session_id: str,
+    asset_type: str | None = None,
+    selected: bool | None = None,
+    user: dict[str, Any] = Depends(auth.current_user),
+):
+    _require_session_access(session_id, user)
+    return {"ok": True, "assets": db.list_assets(session_id, asset_type=asset_type, selected=selected)}
+
+
+@app.post("/api/sessions/{session_id}/assets/cleanup")
+async def cleanup_session_assets(
+    session_id: str,
+    body: dict | None = None,
+    user: dict[str, Any] = Depends(auth.current_user),
+):
+    _require_session_access(session_id, user)
+    body = body or {}
+    keep_selected = bool(body.get("keep_selected", True))
+    assets = db.list_assets(session_id)
+    selected_paths = {
+        str(asset.get("path") or "").strip()
+        for asset in assets
+        if asset.get("selected") and asset.get("path")
+    }
+    targets = [asset for asset in assets if not (keep_selected and asset.get("selected"))]
+    cleanup = _safe_asset_file_cleanup(targets, protected_paths=selected_paths if keep_selected else set())
+    removed_records = db.delete_assets(session_id, [int(asset["id"]) for asset in targets])
+    return {"ok": True, "cleanup": cleanup, "removed_records": removed_records}
+
+
+@app.post("/api/sessions/{session_id}/assets/{asset_id}/select")
+async def select_session_asset(
+    session_id: str,
+    asset_id: int,
+    body: dict | None = None,
+    user: dict[str, Any] = Depends(auth.current_user),
+):
+    _require_session_access(session_id, user)
+    asset = db.select_asset(asset_id, session_id, (body or {}).get("asset_type"))
+    if asset is None:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    return {"ok": True, "asset": asset}
 
 
 @app.get("/api/sessions/{session_id}/voice-profile")
@@ -509,7 +743,18 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
         db.insert_voice_generation(session_id, provider_name, text, json.dumps(profile, ensure_ascii=False), result_path)
         from pathlib import Path
         audio_url = "/exports/voices/" + Path(result_path).name
-        return {"ok": True, "audio_path": result_path, "audio_url": audio_url, "provider": provider_name}
+        asset_id = db.insert_asset(
+            session_id,
+            "voice_sample",
+            provider_name,
+            result_path,
+            {
+                "sample_text": text,
+                "voice_profile": profile,
+                "audio_url": audio_url,
+            },
+        )
+        return {"ok": True, "audio_path": result_path, "audio_url": audio_url, "provider": provider_name, "asset_id": asset_id}
     except Exception as e:
         db.insert_voice_generation(session_id, provider_name, text, json.dumps(profile, ensure_ascii=False), status="failed", error_message=str(e))
         return {"ok": False, "error": str(e)}
@@ -520,17 +765,91 @@ async def voice_sample_candidates(session_id: str, body: dict, user: dict[str, A
     """Generate 3 voice sample candidates with varying parameters for user selection."""
     from .config import get_config, get_project_root
     from .voice_providers.base import get_provider
+    from pathlib import Path
     _require_session_access(session_id, user)
 
     cfg = get_config()
     vc = cfg.get("voice", {})
-    provider_name = body.get("provider") or vc.get("provider", "elevenlabs")
+    provider_name = body.get("provider") or "elevenlabs"
     el_cfg = cfg.get("voice", {}).get("elevenlabs", {})
 
     profile = db.get_voice_profile(session_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Voice profile not found. Analyze first.")
 
+    if provider_name == "elevenlabs":
+        from .voice_providers.elevenlabs_provider import ElevenLabsProvider
+
+        output_dir = get_project_root() / vc.get("output_dir", "exports/voices")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = str(output_dir / f"{session_id}_{provider_name}_design.mp3")
+        provider = ElevenLabsProvider()
+        try:
+            design = await provider.design_voice(profile, output_path=output_path)
+        except Exception as e:
+            db.insert_voice_generation(
+                session_id,
+                "elevenlabs_design",
+                profile.get("sample_text", ""),
+                json.dumps(profile, ensure_ascii=False),
+                status="failed",
+                error_message=str(e),
+            )
+            return {"ok": False, "error": str(e)}
+
+        hints = profile.setdefault("provider_hints", {})
+        hints["provider"] = "elevenlabs"
+        hints["elevenlabs_voice_description"] = design.get("voice_description")
+        hints["elevenlabs_preview_text"] = design.get("preview_text")
+        hints["elevenlabs_previews"] = design.get("preview_metadata", [])
+        hints["elevenlabs_preview_paths"] = design.get("preview_paths", [])
+        db.save_voice_profile(session_id, json.dumps(profile, ensure_ascii=False))
+
+        exports_root = get_project_root() / "exports"
+        candidates = []
+        for preview in design.get("preview_metadata", []):
+            preview_path = preview.get("preview_path") or ""
+            audio_url = ""
+            if preview_path:
+                try:
+                    audio_url = "/exports/" + Path(preview_path).relative_to(exports_root).as_posix()
+                except ValueError:
+                    audio_url = preview_path
+            asset_id = None
+            if preview_path:
+                asset_id = db.insert_asset(
+                    session_id,
+                    "voice_preview",
+                    "elevenlabs",
+                    preview_path,
+                    {
+                        "index": preview.get("index"),
+                        "generated_voice_id": preview.get("generated_voice_id"),
+                        "duration_secs": preview.get("duration_secs"),
+                        "language": preview.get("language"),
+                        "audio_url": audio_url,
+                        "preview_text": design.get("preview_text", ""),
+                    },
+                )
+            candidates.append({
+                "index": preview.get("index"),
+                "label": f"候选 {preview.get('index')}",
+                "generated_voice_id": preview.get("generated_voice_id"),
+                "duration_secs": preview.get("duration_secs"),
+                "language": preview.get("language"),
+                "audio_url": audio_url,
+                "audio_path": preview_path,
+                "asset_id": asset_id,
+            })
+
+        db.insert_voice_generation(
+            session_id,
+            "elevenlabs_design",
+            design.get("preview_text", ""),
+            json.dumps(profile, ensure_ascii=False),
+            None,
+        )
+        return {"ok": True, "candidates": candidates, "provider": provider_name, "preview_text": design.get("preview_text", "")}
     text = body.get("text") or profile.get("sample_text", "你好。")
     output_dir = get_project_root() / vc.get("output_dir", "exports/voices")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -562,12 +881,100 @@ async def voice_sample_candidates(session_id: str, body: dict, user: dict[str, A
                 "similarity_boost": var["similarity_boost"],
                 "audio_url": "/exports/voices/" + Path(result_path).name,
                 "audio_path": result_path,
+                "asset_id": db.insert_asset(
+                    session_id,
+                    "voice_performance_candidate",
+                    provider_name,
+                    result_path,
+                    {
+                        "index": i,
+                        "label": var["label"],
+                        "stability": var["stability"],
+                        "similarity_boost": var["similarity_boost"],
+                        "sample_text": text,
+                    },
+                ),
             })
             db.insert_voice_generation(session_id, f"{provider_name}_c{i}", text, json.dumps(temp_profile, ensure_ascii=False), result_path)
         except Exception as e:
             candidates.append({"index": i, "label": var["label"], "error": str(e)})
 
     return {"ok": True, "candidates": candidates, "provider": provider_name}
+
+
+@app.post("/api/sessions/{session_id}/voice-sample-candidates/select")
+async def select_voice_sample_candidate(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    """Create and save a stable ElevenLabs voice from a selected Voice Design preview."""
+    from .voice_providers.elevenlabs_provider import ElevenLabsProvider
+    _require_session_access(session_id, user)
+
+    profile = db.get_voice_profile(session_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found. Analyze first.")
+
+    index = int(body.get("index") or 1)
+    generated_voice_id = (body.get("generated_voice_id") or "").strip()
+    hints = profile.setdefault("provider_hints", {})
+    previews = hints.get("elevenlabs_previews") or []
+    selected = next((p for p in previews if int(p.get("index") or 0) == index), None)
+    if not generated_voice_id and selected:
+        generated_voice_id = str(selected.get("generated_voice_id") or "")
+    if not generated_voice_id:
+        raise HTTPException(status_code=400, detail="generated_voice_id is required")
+
+    voice_description = str(hints.get("elevenlabs_voice_description") or "")
+    if not voice_description:
+        raise HTTPException(status_code=400, detail="No cached ElevenLabs voice description. Generate candidates first.")
+
+    provider = ElevenLabsProvider()
+    not_selected = [
+        str(p.get("generated_voice_id"))
+        for p in previews
+        if p.get("generated_voice_id") and str(p.get("generated_voice_id")) != generated_voice_id
+    ]
+    try:
+        voice = await provider.create_voice(
+            generated_voice_id=generated_voice_id,
+            voice_name=provider._voice_name(profile),
+            voice_description=voice_description,
+            played_not_selected_voice_ids=not_selected,
+        )
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    hints["provider"] = "elevenlabs"
+    hints["elevenlabs_voice_id"] = voice["voice_id"]
+    hints["elevenlabs_voice_name"] = voice.get("name") or provider._voice_name(profile)
+    hints["elevenlabs_generated_voice_id"] = generated_voice_id
+    hints["elevenlabs_selected_preview_index"] = index
+    db.save_voice_profile(session_id, json.dumps(profile, ensure_ascii=False))
+    selected_preview_asset_id = None
+    for asset in db.list_assets(session_id, asset_type="voice_preview"):
+        if asset.get("metadata", {}).get("generated_voice_id") == generated_voice_id:
+            selected_preview_asset_id = asset["id"]
+            db.select_asset(int(asset["id"]), session_id, "voice_preview")
+            break
+    voice_identity_asset_id = db.insert_asset(
+        session_id,
+        "voice_identity",
+        "elevenlabs",
+        str(voice["voice_id"]),
+        {
+            "generated_voice_id": generated_voice_id,
+            "selected_preview_index": index,
+            "selected_preview_asset_id": selected_preview_asset_id,
+            "voice_name": voice.get("name") or provider._voice_name(profile),
+            "voice_profile": profile,
+        },
+        selected=True,
+    )
+    return {
+        "ok": True,
+        "voice_id": voice["voice_id"],
+        "voice_profile": profile,
+        "asset_id": voice_identity_asset_id,
+        "selected_preview_asset_id": selected_preview_asset_id,
+    }
 
 
 @app.post("/api/sessions/{session_id}/voice-reference")
@@ -705,23 +1112,36 @@ async def voice_library_favorite(body: dict, user: dict[str, Any] = Depends(auth
 
 
 @app.post("/api/reference-audios")
-async def upload_reference_audio(label: str = Body(...), transcript: str | None = Body(None), audio: UploadFile = Body(...), user: dict[str, Any] = Depends(auth.current_user)):
+async def upload_reference_audio(
+    label: str = Form(...),
+    transcript: str | None = Form(None),
+    language: str = Form(default="zh"),
+    audio: UploadFile = File(...),
+    user: dict[str, Any] = Depends(auth.current_user),
+):
     """Upload a Chinese reference audio for voice cloning."""
     from pathlib import Path as _Path
     ref_dir = get_project_root() / "exports" / "references"
     ref_dir.mkdir(parents=True, exist_ok=True)
 
     uid = user["id"]
-    safe_label = "".join(c for c in label if c.isalnum() or c in "._- ")[:30]
-    ext = audio.filename.rsplit(".", 1)[-1] if audio.filename and "." in audio.filename else "mp3"
-    fname = f"ref_{uid}_{safe_label}.{ext}"
+    clean_label = label.strip()
+    if not clean_label:
+        raise HTTPException(status_code=400, detail="label is required")
+    safe_label = "".join(c for c in clean_label if c.isalnum() or c in "._- ")[:30] or "reference"
+    ext = _Path(audio.filename or "reference.mp3").suffix.lower() or ".mp3"
+    if ext not in {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac"}:
+        raise HTTPException(status_code=400, detail="Unsupported audio format")
+    fname = f"ref_{uid}_{safe_label}{ext}"
     file_path = ref_dir / fname
 
-    content = await audio.read()
+    content = await audio.read(MAX_VOICE_REFERENCE_BYTES + 1)
+    if len(content) > MAX_VOICE_REFERENCE_BYTES:
+        raise HTTPException(status_code=413, detail="Reference audio is too large. Max size is 50MB.")
     file_path.write_bytes(content)
 
-    db.insert_reference_audio(int(uid), label, str(file_path), transcript)
-    return {"ok": True, "file_path": str(file_path), "label": label}
+    db.insert_reference_audio(int(uid), clean_label, str(file_path), transcript, language)
+    return {"ok": True, "file_path": str(file_path), "label": clean_label}
 
 
 @app.get("/api/reference-audios")
@@ -768,3 +1188,5 @@ def logout(response: Response, request: Request):
 @app.get("/api/auth/me")
 def me(user: dict[str, Any] = Depends(auth.current_user)):
     return {"ok": True, "user": auth.public_user(user)}
+
+

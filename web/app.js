@@ -86,56 +86,36 @@
 
   // ─── API helpers ─────────────────────────────────────
   async function apiCall(method, url, body) {
-    const opts = {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-    };
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
     if (body) opts.body = JSON.stringify(body);
-
     let resp;
     try {
       resp = await fetch(url, opts);
     } catch (e) {
-      throw new Error('无法连接服务器，请确认后端已启动 (http://127.0.0.1:8010)');
+      throw new Error('\u65e0\u6cd5\u8fde\u63a5\u670d\u52a1\u5668\uff0c\u8bf7\u786e\u8ba4\u540e\u7aef\u5df2\u542f\u52a8 (http://127.0.0.1:8010)');
     }
-
     if (!resp.ok) {
-      if (resp.status === 500) throw new Error('服务器内部错误，请查看终端日志');
-      if (resp.status === 404) throw new Error('会话不存在或已过期');
-      throw new Error('请求失败 (' + resp.status + ')');
+      if (resp.status === 500) throw new Error('\u670d\u52a1\u5668\u5185\u90e8\u9519\u8bef\uff0c\u8bf7\u67e5\u770b\u7ec8\u7aef\u65e5\u5fd7');
+      if (resp.status === 404) throw new Error('\u4f1a\u8bdd\u4e0d\u5b58\u5728\u6216\u5df2\u8fc7\u671f');
+      throw new Error('\u8bf7\u6c42\u5931\u8d25 (' + resp.status + ')');
     }
-
     const data = await resp.json();
-
-    if (data.ok === false) {
-      throw new Error(data.error || data.detail || '请求失败');
-    }
-
+    if (data.ok === false) throw new Error(data.error || data.detail || '\u8bf7\u6c42\u5931\u8d25');
     return data;
   }
 
-  // ─── Markdown rendering (basic) ──────────────────────
   function renderMarkdown(text) {
     if (!text) return '';
     let html = escapeHtml(text);
-
-    // Bold
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-
-    // Numbered lists: detect lines starting with number + dot
     html = html.replace(/(?:^|\n)(\d+)\. (.+?)(?=\n|$)/g, function (m, num, content) {
       return '\n<li>' + num + '. ' + content + '</li>';
     });
-
-    // Wrap consecutive <li> in <ol>
     html = html.replace(/((?:<li>.*?<\/li>\n?)+)/g, function (m) {
       return '<ol>' + m + '</ol>';
     });
-
-    // Line breaks
     html = html.replace(/\n\n/g, '<br><br>');
     html = html.replace(/\n/g, '<br>');
-
     return html;
   }
 
@@ -152,21 +132,17 @@
     return escapeHtml(value);
   }
 
-  // ─── Chat rendering ──────────────────────────────────
   function addMessage(role, content, timestamp) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
-
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
     bubble.innerHTML = renderMarkdown(content);
     div.appendChild(bubble);
-
     const time = document.createElement('div');
     time.className = 'msg-time';
     time.textContent = timestamp || new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     div.appendChild(time);
-
     chatMessages.appendChild(div);
     scrollToBottom();
   }
@@ -175,12 +151,10 @@
     const div = document.createElement('div');
     div.className = 'msg assistant thinking';
     div.id = 'thinking-msg';
-
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
-    bubble.innerHTML = '思考中<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
+    bubble.innerHTML = '\u601d\u8003\u4e2d<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
     div.appendChild(bubble);
-
     chatMessages.appendChild(div);
     scrollToBottom();
   }
@@ -194,52 +168,48 @@
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  // ─── Draft panel update ──────────────────────────────
   const STAGE_LABELS = {
-    core_concept: '核心概念',
-    personality: '性格塑造',
-    appearance: '外貌描述',
-    background: '背景故事',
-    abilities: '能力设定',
-    relationships: '人际关系',
-    speaking_style: '说话方式',
-    scenario: '使用场景',
-    opening: '开场设计',
-    final_review: '最终确认',
+    core_concept: '\u6838\u5fc3\u6982\u5ff5',
+    personality: '\u6027\u683c\u5851\u9020',
+    appearance: '\u5916\u8c8c\u63cf\u8ff0',
+    background: '\u80cc\u666f\u6545\u4e8b',
+    abilities: '\u80fd\u529b\u8bbe\u5b9a',
+    relationships: '\u4eba\u9645\u5173\u7cfb',
+    speaking_style: '\u8bf4\u8bdd\u65b9\u5f0f',
+    scenario: '\u4f7f\u7528\u573a\u666f',
+    opening: '\u5f00\u573a\u8bbe\u8ba1',
+    final_review: '\u6700\u7ec8\u786e\u8ba4',
   };
 
   const FIELD_LABELS = {
-    name: '名字',
-    core_concept: '核心概念',
-    personality: '性格',
-    appearance: '外貌',
-    background: '背景',
-    speaking_style: '说话方式',
-    scenario: '使用场景',
-    abilities: '能力',
-    weaknesses: '弱点',
-    relationships: '关系',
-    first_message: '开场白',
-    example_dialogue: '示例对话',
+    name: '\u540d\u5b57',
+    core_concept: '\u6838\u5fc3\u6982\u5ff5',
+    personality: '\u6027\u683c',
+    appearance: '\u5916\u8c8c',
+    background: '\u80cc\u666f',
+    speaking_style: '\u8bf4\u8bdd\u65b9\u5f0f',
+    scenario: '\u573a\u666f',
+    abilities: '\u80fd\u529b',
+    weaknesses: '\u5f31\u70b9',
+    relationships: '\u5173\u7cfb',
+    first_message: '\u5f00\u573a\u767d',
+    example_dialogue: '\u793a\u4f8b\u5bf9\u8bdd',
   };
 
   function updateDraftPanel(draft) {
     state.draft = draft;
-
-    // Update field values
     $$('.draft-field').forEach(function (el) {
       const field = el.dataset.field;
       const valueEl = el.querySelector('.field-value');
       if (!field || !valueEl) return;
-
       const val = draft[field];
-
-      if (field === 'personality' || field === 'abilities' || field === 'weaknesses' || field === 'relationships' || field === 'themes' || field === 'tags') {
+      const isListField = ['personality','abilities','weaknesses','relationships','themes','tags'].includes(field);
+      if (isListField) {
         if (Array.isArray(val) && val.length > 0) {
-          valueEl.textContent = val.join('、');
+          valueEl.textContent = val.join('\u3001');
           valueEl.classList.remove('empty');
         } else {
-          valueEl.textContent = '待补充';
+          valueEl.textContent = '\u5f85\u8865\u5145';
           valueEl.classList.add('empty');
         }
       } else if (val && typeof val === 'string' && val.trim()) {
@@ -249,116 +219,85 @@
         valueEl.textContent = String(val);
         valueEl.classList.remove('empty');
       } else {
-        valueEl.textContent = '待补充';
+        valueEl.textContent = '\u5f85\u8865\u5145';
         valueEl.classList.add('empty');
       }
-
-      // Locked indicator
-      if (draft.locked_fields && draft.locked_fields.includes(field)) {
-        el.classList.add('locked');
-      } else {
-        el.classList.remove('locked');
-      }
-
-      // Make editable on click
+      if (draft.locked_fields && draft.locked_fields.includes(field)) el.classList.add('locked');
+      else el.classList.remove('locked');
       if (!el._editBound) {
         el._editBound = true;
-        el.addEventListener('click', function(e) {
+        el.addEventListener('click', function() {
           if (el.querySelector('input, textarea')) return;
           var valEl = el.querySelector('.field-value');
           var currentVal = draft[field];
           var isList = ['personality','abilities','weaknesses','relationships','themes','tags'].includes(field);
-
           var input = document.createElement(isList ? 'input' : 'textarea');
           input.className = 'field-edit';
           if (isList) {
-            input.value = Array.isArray(currentVal) ? currentVal.join('、') : '';
-            input.placeholder = '用顿号分隔';
+            input.value = Array.isArray(currentVal) ? currentVal.join('\u3001') : '';
+            input.placeholder = '\u7528\u987f\u53f7\u6216\u9017\u53f7\u5206\u9694';
           } else {
             input.value = (typeof currentVal === 'string') ? currentVal : '';
-            input.placeholder = '输入内容……';
+            input.placeholder = '\u8f93\u5165\u5185\u5bb9...';
             input.rows = 3;
           }
           valEl.replaceWith(input);
           input.focus();
-
           async function saveEdit() {
             var newVal = input.value.trim();
             var update = {};
-            if (isList) {
-              update[field] = newVal ? newVal.split(/[、,，]/).map(function(s) { return s.trim(); }).filter(Boolean) : [];
-            } else {
-              update[field] = newVal || null;
-            }
-
+            if (isList) update[field] = newVal ? newVal.split(/[\u3001,，]/).map(function(s) { return s.trim(); }).filter(Boolean) : [];
+            else update[field] = newVal || null;
             try {
               var data = await apiCall('PATCH', '/api/sessions/' + state.sessionId + '/draft', { updates: update });
               if (data.draft) updateDraftPanel(data.draft);
-              showToast('已保存', 'success');
+              showToast('\u5df2\u4fdd\u5b58', 'success');
             } catch (e) {
-              showToast('保存失败: ' + e.message, 'error');
-              updateDraftPanel(state.draft); // revert
+              showToast('\u4fdd\u5b58\u5931\u8d25: ' + e.message, 'error');
+              updateDraftPanel(state.draft);
             }
           }
-
           input.addEventListener('blur', saveEdit);
           input.addEventListener('keydown', function(ev) {
             if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); input.blur(); }
-            if (ev.key === 'Escape') { updateDraftPanel(state.draft); }
+            if (ev.key === 'Escape') updateDraftPanel(state.draft);
           });
         });
       }
     });
-
-    // Completion score
     const score = draft.completion_score || 0;
     const pct = Math.round(score * 100);
     var coreFields = ['name','core_concept','personality','appearance','background'];
     var filled = coreFields.filter(function(f) { return draft[f] && (typeof draft[f] !== 'object' || draft[f].length > 0); }).length;
-    $('#completion-detail').textContent = '核心字段 ' + filled + '/' + coreFields.length;
+    $('#completion-detail').textContent = '\u6838\u5fc3\u5b57\u6bb5 ' + filled + '/' + coreFields.length;
     $('#completion-percent').textContent = pct + '%';
     $('#progress-fill').style.width = pct + '%';
-
-    // Update draft panel title to show character name
     var draftTitle = draft.name || draft.core_concept;
-    $('.draft-title').textContent = draftTitle ? '角色 · ' + draftTitle.slice(0, 15) : '角色草稿';
-
-    // Current stage
+    $('.draft-title').textContent = draftTitle ? '\u89d2\u8272 · ' + draftTitle.slice(0, 15) : '\u89d2\u8272\u8349\u7a3f';
     const stage = draft.current_stage || 'core_concept';
     $('#current-stage').textContent = STAGE_LABELS[stage] || stage;
   }
 
-  // ─── Session lifecycle ───────────────────────────────
   async function createSession(idea, fastMode) {
     hideError(welcomeError);
-    setLoading(true, fastMode ? $('#btn-fast') : btnStart, fastMode ? '生成中……' : '创建中……');
-
+    setLoading(true, fastMode ? $('#btn-fast') : btnStart, fastMode ? '生成中…' : '创建中…');
     try {
       const data = await apiCall('POST', '/api/sessions', { initial_idea: idea, fast_mode: fastMode });
       state.sessionId = data.session_id;
-
-      // Transition to workspace
       dashboard.classList.add('hidden');
       welcomeScreen.classList.add('hidden');
       workspace.classList.remove('hidden');
       btnBackDash.classList.remove('hidden');
       chatMessages.innerHTML = '';
-
-      // Add initial messages
       addMessage('user', idea);
       addMessage('assistant', data.assistant_message);
-
-      // Update draft
       if (data.draft) updateDraftPanel(data.draft);
-
-      // Show card preview in fast mode
       if (data.card) showCardPreview(data.card);
-
     } catch (e) {
       showError(welcomeError, e.message);
     } finally {
       var restoreBtn = fastMode ? $('#btn-fast') : btnStart;
-      var restoreText = fastMode ? '⚡ 一键生成角色卡' : '开始创作 · 逐步引导';
+      var restoreText = fastMode ? '一键生成角色卡' : '开始创作 · 逐步引导';
       setLoading(false, restoreBtn, restoreText);
     }
   }
@@ -366,22 +305,17 @@
   async function sendMessage() {
     const message = chatInput.value.trim();
     if (!message || state.isLoading || !state.sessionId) return;
-
     chatInput.value = '';
     hideError(exportStatus);
-    setLoading(true, btnSend, '发送中……');
+    setLoading(true, btnSend, '发送中…');
     addMessage('user', message);
     addThinkingMessage();
-
     try {
       const data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/messages', { message: message });
-
       removeThinkingMessage();
       addMessage('assistant', data.assistant_message);
-
       if (data.draft) updateDraftPanel(data.draft);
       if (data.card) showCardPreview(data.card);
-
     } catch (e) {
       removeThinkingMessage();
       showToast(e.message, 'error');
@@ -393,13 +327,10 @@
 
   async function exportCard() {
     if (!state.sessionId) return;
-
-    setLoading(true, btnExport, '导出中……');
+    setLoading(true, btnExport, '导出中…');
     hideError(exportStatus);
-
     try {
       const data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/export/card-v2');
-
       if (data.ok) {
         exportStatus.textContent = '';
         exportStatus.className = 'export-status';
@@ -418,7 +349,6 @@
     }
   }
 
-  // ─── Card Preview ────────────────────────────────────
   function showCardPreview(card) {
     var data = card.data || card;
     cardName.textContent = data.name || '未命名';
@@ -428,7 +358,6 @@
     cardScenario.textContent = data.scenario || '';
     cardFirstMes.textContent = data.first_mes || '';
     cardMesExample.textContent = data.mes_example || '';
-
     var greetings = $('#card-greetings');
     var greetsSection = $('#card-greetings-section');
     if (data.alternate_greetings && data.alternate_greetings.length > 0) {
@@ -437,7 +366,6 @@
     } else {
       greetsSection.classList.add('hidden');
     }
-
     var notesSection = $('#card-notes-section');
     if (data.creator_notes) {
       $('#card-creator-notes').textContent = data.creator_notes;
@@ -445,7 +373,6 @@
     } else {
       notesSection.classList.add('hidden');
     }
-
     cardOverlay.classList.remove('hidden');
   }
 
@@ -466,7 +393,6 @@
   btnCloseCard.addEventListener('click', hideCardPreview);
   btnBackChat.addEventListener('click', hideCardPreview);
   btnDownloadV2.addEventListener('click', downloadCard);
-
   cardOverlay.addEventListener('click', function(e) {
     if (e.target === cardOverlay) hideCardPreview();
   });
@@ -486,19 +412,16 @@
     exportStatus.classList.add('hidden');
   }
 
-  // ─── Character Library ───────────────────────────────
   async function loadLibrary() {
     try {
       var data = await apiCall('GET', '/api/sessions');
       var sessions = data.sessions || [];
       libraryList.innerHTML = '';
-
       if (sessions.length === 0) {
         libraryList.innerHTML = '<div class="library-empty">还没有创建过角色<br>去首页开始创作吧</div>';
         btnLibrary.textContent = '角色库';
         return;
       }
-
       sessions.forEach(function(s) {
         var div = document.createElement('div');
         div.className = 'library-item';
@@ -507,7 +430,6 @@
         var concept = s.core_concept || '';
         var score = Math.round((s.completion_score || 0) * 100);
         var date = new Date(s.updated_at).toLocaleDateString('zh-CN');
-
         div.innerHTML =
           '<div class="library-item-avatar">' + escapeHtml(name[0] || '?') + '</div>' +
           '<div class="library-item-info">' +
@@ -519,7 +441,6 @@
             '<div class="library-item-date">' + escapeHtml(date) + '</div>' +
           '</div>' +
           '<button class="library-item-del" data-sid="' + escapeAttr(s.id) + '">&times;</button>';
-
         div.querySelector('.library-item-del').addEventListener('click', function(e) {
           e.stopPropagation();
           deleteSession(s.id, name);
@@ -527,36 +448,28 @@
         div.addEventListener('click', function() { resumeSession(s.id); });
         libraryList.appendChild(div);
       });
-
       btnLibrary.textContent = '角色库 (' + sessions.length + ')';
     } catch (e) {
-      libraryList.innerHTML = '<div class="library-empty">加载失败：' + escapeHtml(e.message) + '</div>';
+      libraryList.innerHTML = '<div class="library-empty">加载失败: ' + escapeHtml(e.message) + '</div>';
       btnLibrary.textContent = '角色库';
     }
   }
 
   async function resumeSession(sessionId) {
     try {
-      setLoading(true, btnStart, '加载中……');
+      setLoading(true, btnStart, '加载中…');
       var data = await apiCall('GET', '/api/sessions/' + sessionId + '/resume');
       state.sessionId = data.session_id;
-
-      // Hide library + dashboard + welcome, show workspace
       libraryOverlay.classList.add('hidden');
       dashboard.classList.add('hidden');
       welcomeScreen.classList.add('hidden');
       workspace.classList.remove('hidden');
       btnBackDash.classList.remove('hidden');
       chatMessages.innerHTML = '';
-
-      // Restore messages
       (data.messages || []).forEach(function(m) {
         addMessage(m.role, m.content, new Date(m.created_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }));
       });
-
-      // Update draft
       if (data.draft) updateDraftPanel(data.draft);
-
       showToast('已恢复角色「' + (data.draft.name || data.draft.core_concept || '未命名') + '」', 'success');
     } catch (e) {
       showToast(e.message, 'error');
@@ -580,16 +493,12 @@
       await apiCall('DELETE', '/api/sessions/' + sessionId);
       showToast('已删除', 'success');
       loadLibrary();
-      // If currently viewing this session, go back to dashboard
-      if (state.sessionId === sessionId) {
-        showDashboard();
-      }
+      if (state.sessionId === sessionId) showDashboard();
     } catch (e) {
       showToast(e.message, 'error');
     }
   }
 
-  // ─── Dashboard ──────────────────────────────────────
   async function showDashboard() {
     welcomeScreen.classList.add('hidden');
     workspace.classList.add('hidden');
@@ -598,7 +507,6 @@
     btnBackDash.classList.add('hidden');
   }
 
-  // "New character" from dashboard
   btnDashNew.addEventListener('click', function() {
     dashboard.classList.add('hidden');
     welcomeScreen.classList.remove('hidden');
@@ -611,38 +519,30 @@
     showDashboard();
   });
 
-  // After creating session, stay in workspace - fast mode handled via parameter
-
-  // ─── Loading state ───────────────────────────────────
   function setLoading(loading, btn, originalText) {
     state.isLoading = loading;
     btn.disabled = loading;
     if (loading) {
       btn.dataset.originalText = originalText || btn.textContent;
-      btn.textContent = btn.dataset.originalText || '处理中……';
+      btn.textContent = btn.dataset.originalText || '处理中…';
     } else {
       btn.textContent = originalText || btn.dataset.originalText || btn.textContent;
       btn.disabled = false;
     }
   }
 
-  // ─── Event listeners ─────────────────────────────────
-
-  // Start session - normal mode
   btnStart.addEventListener('click', function () {
     const idea = initialIdea.value.trim();
     if (!idea) { showError(welcomeError, '请输入角色灵感'); return; }
     createSession(idea, false);
   });
 
-  // Fast mode
   $('#btn-fast').addEventListener('click', function () {
     const idea = initialIdea.value.trim();
     if (!idea) { showError(welcomeError, '请输入角色灵感'); return; }
     createSession(idea, true);
   });
 
-  // Enter key on initial idea (Ctrl+Enter or just Enter)
   initialIdea.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -650,10 +550,8 @@
     }
   });
 
-  // Send message
   btnSend.addEventListener('click', sendMessage);
 
-  // Enter to send, Shift+Enter for newline
   chatInput.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -661,7 +559,6 @@
     }
   });
 
-  // New session
   btnNewSession.addEventListener('click', function () {
     if (state.sessionId && state.draft && state.draft.completion_score > 0.1) {
       if (!confirm('确定要开始新角色吗？当前创作进度将丢失。')) return;
@@ -670,49 +567,276 @@
     showDashboard();
   });
 
-  // Export
   btnExport.addEventListener('click', exportCard);
 
-  // Draft panel action buttons
+  var assetOverlay = null;
+  var assetContent = null;
+
+  function assetDisplayUrl(asset) {
+    var meta = asset.metadata || {};
+    if (meta.audio_url) return meta.audio_url;
+    var p = asset.path || '';
+    if (!p) return '';
+    var name = p.split(/[\\/]/).pop();
+    if (!name) return '';
+    if ((asset.asset_type || '').indexOf('image_') === 0) return '/exports/images/' + name;
+    if ((asset.asset_type || '').indexOf('voice_') === 0) return '/exports/voices/' + name;
+    return '';
+  }
+
+  function assetTypeLabel(type) {
+    var labels = {
+      image_candidate: '\u7acb\u7ed8\u5019\u9009',
+      image_locked: '\u5df2\u9501\u5b9a\u7acb\u7ed8',
+      voice_preview: '\u58f0\u97f3\u5019\u9009',
+      voice_identity: '\u5df2\u9501\u5b9a\u58f0\u97f3',
+      voice_sample: '\u8bd5\u542c\u6837\u672c',
+      voice_performance_candidate: '\u8868\u6f14\u5019\u9009',
+    };
+    return labels[type] || type || '\u672a\u5206\u7c7b';
+  }
+
+  function ensureAssetOverlay() {
+    if (assetOverlay) return;
+    assetOverlay = document.createElement('div');
+    assetOverlay.className = 'asset-overlay hidden';
+    assetOverlay.innerHTML =
+      '<div class="asset-panel">' +
+        '<div class="asset-panel-header">' +
+          '<h3>\u8d44\u4ea7\u5386\u53f2</h3>' +
+          '<div class="asset-panel-actions">' +
+            '<button type="button" class="btn-adopt-idea" id="btn-asset-cleanup">\u6e05\u7406\u672a\u9009</button>' +
+            '<button type="button" class="btn-close-card" id="btn-asset-close">&times;</button>' +
+          '</div>' +
+        '</div>' +
+        '<div id="asset-content" class="asset-content"></div>' +
+      '</div>';
+    document.body.appendChild(assetOverlay);
+    assetContent = assetOverlay.querySelector('#asset-content');
+    assetOverlay.querySelector('#btn-asset-close').addEventListener('click', function() {
+      assetOverlay.classList.add('hidden');
+    });
+    assetOverlay.querySelector('#btn-asset-cleanup').addEventListener('click', async function() {
+      if (!state.sessionId || !confirm('\u6e05\u7406\u672a\u9009\u5019\u9009\u8d44\u4ea7\uff1f\u5df2\u9501\u5b9a\u7684\u56fe\u50cf\u548c\u58f0\u97f3\u4f1a\u4fdd\u7559\u3002')) return;
+      try {
+        var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/assets/cleanup', { keep_selected: true });
+        showToast('\u5df2\u6e05\u7406 ' + (data.removed_records || 0) + ' \u6761\u8d44\u4ea7\u8bb0\u5f55', 'success');
+        await loadAssets();
+      } catch(e) { showToast(e.message, 'error'); }
+    });
+    assetOverlay.addEventListener('click', function(e) {
+      if (e.target === assetOverlay) assetOverlay.classList.add('hidden');
+    });
+  }
+
+  function renderAssets(assets) {
+    if (!assets.length) {
+      assetContent.innerHTML = '<div class="asset-empty">\u8fd8\u6ca1\u6709\u751f\u6210\u8d44\u4ea7\u3002</div>';
+      return;
+    }
+    var grouped = {};
+    assets.forEach(function(asset) {
+      var key = asset.asset_type || 'unknown';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(asset);
+    });
+    var order = ['image_locked', 'image_candidate', 'voice_identity', 'voice_preview', 'voice_sample', 'voice_performance_candidate'];
+    var keys = order.filter(function(k) { return grouped[k]; }).concat(Object.keys(grouped).filter(function(k) { return order.indexOf(k) < 0; }));
+    var html = '';
+    keys.forEach(function(type) {
+      html += '<section class="asset-section"><h4>' + escapeHtml(assetTypeLabel(type)) + '</h4><div class="asset-grid">';
+      grouped[type].forEach(function(asset) {
+        var meta = asset.metadata || {};
+        var url = assetDisplayUrl(asset);
+        html += '<article class="asset-card' + (asset.selected ? ' selected' : '') + '">';
+        if (url && type.indexOf('image_') === 0) html += '<img class="asset-thumb" src="' + escapeAttr(url) + '" alt="">';
+        if (url && type.indexOf('voice_') === 0) html += '<audio controls src="' + escapeAttr(url) + '"></audio>';
+        html += '<div class="asset-meta">';
+        html += '<strong>' + escapeHtml(meta.label || assetTypeLabel(type)) + '</strong>';
+        html += '<span>' + escapeHtml(asset.provider || '') + '</span>';
+        if (asset.created_at) html += '<span>' + escapeHtml(new Date(asset.created_at).toLocaleString('zh-CN')) + '</span>';
+        if (asset.selected) html += '<em>\u5df2\u9009\u4e2d</em>';
+        html += '</div><div class="asset-actions">';
+        if (type === 'image_locked') {
+          html += '<button type="button" class="btn-adopt-idea asset-variation-image" data-id="' + escapeAttr(asset.id) + '">\u751f\u6210\u53d8\u4f53</button>';
+        } else if (type === 'image_candidate') {
+          html += '<button type="button" class="btn-adopt-idea asset-lock-image" data-id="' + escapeAttr(asset.id) + '" data-style="' + escapeAttr(meta.style || '') + '" data-prompt="' + escapeAttr(meta.prompt || '') + '">\u9501\u5b9a\u4e3a canon</button>';
+        } else {
+          html += '<button type="button" class="btn-adopt-idea asset-select" data-id="' + escapeAttr(asset.id) + '" data-type="' + escapeAttr(type) + '">\u9009\u4e2d</button>';
+        }
+        html += '</div></article>';
+      });
+      html += '</div></section>';
+    });
+    assetContent.innerHTML = html;
+
+    assetContent.querySelectorAll('.asset-lock-image').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        try {
+          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/visual-canon-lock', {
+            asset_id: Number(this.dataset.id),
+            style: this.dataset.style || '',
+            prompt: this.dataset.prompt || '',
+          });
+          showToast(data.ok ? '\u5df2\u9501\u5b9a\u89c6\u89c9 canon' : '\u9501\u5b9a\u5931\u8d25', data.ok ? 'success' : 'error');
+          await loadAssets();
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    });
+    assetContent.querySelectorAll('.asset-variation-image').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        try {
+          ensureImageOverlay();
+          imageOverlay.classList.remove('hidden');
+          imageContent.innerHTML = '<div class="image-loading">\u6b63\u5728\u57fa\u4e8e\u5df2\u9501\u5b9a\u7acb\u7ed8\u751f\u6210\u4e00\u81f4\u6027\u53d8\u4f53\u2026</div>';
+          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-variations', {});
+          renderImageCandidates(data.candidates || []);
+          await loadAssets();
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    });
+    assetContent.querySelectorAll('.asset-select').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        try {
+          await apiCall('POST', '/api/sessions/' + state.sessionId + '/assets/' + this.dataset.id + '/select', { asset_type: this.dataset.type || '' });
+          showToast('\u5df2\u9009\u4e2d\u8d44\u4ea7', 'success');
+          await loadAssets();
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    });
+  }
+
+  async function loadAssets() {
+    if (!state.sessionId) return;
+    ensureAssetOverlay();
+    assetContent.innerHTML = '<div class="asset-loading">\u6b63\u5728\u8bfb\u53d6\u8d44\u4ea7\u2026</div>';
+    var data = await apiCall('GET', '/api/sessions/' + state.sessionId + '/assets');
+    renderAssets(data.assets || []);
+  }
+
+  function ensureAssetButton() {
+    var actions = document.querySelector('.draft-actions');
+    if (!actions || document.getElementById('btn-assets')) return;
+    var btn = document.createElement('button');
+    btn.id = 'btn-assets';
+    btn.className = 'btn-draft-action';
+    btn.type = 'button';
+    btn.textContent = '\u8d44\u4ea7\u5386\u53f2';
+    btn.addEventListener('click', async function() {
+      if (!state.sessionId) return;
+      ensureAssetOverlay();
+      assetOverlay.classList.remove('hidden');
+      try { await loadAssets(); } catch(e) { assetContent.innerHTML = '<div class="asset-error">' + escapeHtml(e.message) + '</div>'; }
+    });
+    actions.appendChild(btn);
+  }
+
+  ensureAssetButton();
+
   $('#btn-world').addEventListener('click', async function() {
     if (!state.sessionId) return;
     try {
-      showToast('正在生成世界观……', 'success');
+      showToast('正在生成世界观…', 'success');
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/world');
       if (data.ok) showToast('世界观已生成', 'success');
     } catch(e) { showToast(e.message, 'error'); }
   });
 
+  var imageOverlay = null;
+  var imageContent = null;
+
+  function ensureImageOverlay() {
+    if (imageOverlay) return;
+    imageOverlay = document.createElement('div');
+    imageOverlay.className = 'image-overlay hidden';
+    imageOverlay.innerHTML =
+      '<div class="image-panel">' +
+        '<div class="image-panel-header">' +
+          '<h3>\u7acb\u7ed8\u5019\u9009</h3>' +
+          '<button type="button" class="btn-close-card" id="btn-image-close">&times;</button>' +
+        '</div>' +
+        '<div id="image-content" class="image-content"></div>' +
+      '</div>';
+    document.body.appendChild(imageOverlay);
+    imageContent = imageOverlay.querySelector('#image-content');
+    imageOverlay.querySelector('#btn-image-close').addEventListener('click', function() {
+      imageOverlay.classList.add('hidden');
+    });
+    imageOverlay.addEventListener('click', function(e) {
+      if (e.target === imageOverlay) imageOverlay.classList.add('hidden');
+    });
+  }
+
+  function renderImageCandidates(candidates) {
+    if (!candidates.length) {
+      imageContent.innerHTML = '<div class="image-empty">\u6ca1\u6709\u751f\u6210\u53ef\u7528\u5019\u9009\u3002</div>';
+      return;
+    }
+    var html = '<div class="image-candidate-grid">';
+    candidates.forEach(function(c) {
+      html += '<div class="image-candidate">';
+      html += '<div class="image-candidate-title">' + escapeHtml(c.label || ('\u5019\u9009 ' + c.index)) + '</div>';
+      if (c.image_url) {
+        html += '<img src="' + escapeAttr(c.image_url) + '" alt="' + escapeAttr(c.label || 'image candidate') + '">';
+      } else {
+        html += '<div class="image-error">' + escapeHtml(c.error || '\u751f\u6210\u5931\u8d25') + '</div>';
+      }
+      html += '<div class="image-candidate-actions">';
+      if (c.asset_id) {
+        html += '<button type="button" class="btn-adopt-idea image-lock-btn" data-asset="' + escapeAttr(c.asset_id) + '" data-style="' + escapeAttr(c.style || '') + '" data-prompt="' + escapeAttr(c.prompt || '') + '">\u9501\u5b9a</button>';
+      }
+      if (c.prompt) {
+        html += '<button type="button" class="btn-adopt-idea image-copy-btn" data-prompt="' + escapeAttr(c.prompt) + '">\u590d\u5236 Prompt</button>';
+      }
+      html += '</div></div>';
+    });
+    html += '</div>';
+    imageContent.innerHTML = html;
+
+    imageContent.querySelectorAll('.image-lock-btn').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        try {
+          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/visual-canon-lock', {
+            asset_id: Number(this.dataset.asset),
+            style: this.dataset.style || '',
+            prompt: this.dataset.prompt || '',
+          });
+          showToast(data.ok ? '\u5df2\u9501\u5b9a\u89d2\u8272\u89c6\u89c9 canon' : '\u9501\u5b9a\u5931\u8d25', data.ok ? 'success' : 'error');
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    });
+    imageContent.querySelectorAll('.image-copy-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        navigator.clipboard.writeText(this.dataset.prompt || '').then(function() {
+          showToast('Prompt \u5df2\u590d\u5236', 'success');
+        }).catch(function() {
+          showToast('\u590d\u5236\u5931\u8d25', 'error');
+        });
+      });
+    });
+  }
+
   $('#btn-image').addEventListener('click', async function() {
     if (!state.sessionId) return;
-    showToast('正在生成立绘……', 'success');
+    ensureImageOverlay();
+    imageOverlay.classList.remove('hidden');
+    imageContent.innerHTML = '<div class="image-loading">\u6b63\u5728\u751f\u6210\u4e09\u5f20\u5019\u9009\u7acb\u7ed8\u2026</div>';
     try {
-      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image', {});
-      if (data.ok) {
-        showToast('立绘已生成', 'success');
-        // Show prompt + copy button in a toast-like notification
-        var msg = 'Prompt:\n' + (data.prompt || '') + '\n\n点击确认复制到剪贴板';
-        if (confirm(msg)) {
-          navigator.clipboard.writeText(data.prompt || '').catch(function(){});
-        }
-      }
-      else showToast(data.error || '生图失败', 'error');
-    } catch(e) { showToast(e.message, 'error'); }
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', {});
+      renderImageCandidates(data.candidates || []);
+    } catch(e) {
+      imageContent.innerHTML = '<div class="image-error">' + escapeHtml(e.message) + '</div>';
+    }
   });
 
   $('#btn-bridge').addEventListener('click', async function() {
     if (!state.sessionId) return;
     try {
-      showToast('正在导入忆界树……', 'success');
+      showToast('\u6b63\u5728\u5bfc\u5165\u5fc6\u754c\u6811\u2026', 'success');
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/import-to-mnemosyne', {});
-      if (data.ok) {
-        showToast(data.message || '已导入忆界树', 'success');
-      } else {
-        showToast(data.error || '导入失败', 'error');
-      }
-    } catch(e) {
-      showToast(e.message, 'error');
-    }
+      if (data.ok) showToast(data.message || '\u5df2\u5bfc\u5165\u5fc6\u754c\u6811', 'success');
+      else showToast(data.error || '\u5bfc\u5165\u5931\u8d25', 'error');
+    } catch(e) { showToast(e.message, 'error'); }
   });
 
   // Voice panel
@@ -733,7 +857,7 @@
 
   $('#btn-voice-analyze').addEventListener('click', async function() {
     if (!state.sessionId) return;
-    voiceContent.innerHTML = '<div class="voice-loading">分析中……</div>';
+    voiceContent.innerHTML = '<div class="voice-loading">分析中…</div>';
     try {
       if (!voiceOptions) await loadVoiceOptions();
       var data = await apiCall('GET', '/api/sessions/' + state.sessionId + '/voice-profile');
@@ -754,19 +878,11 @@
       var body = { provider: provider };
       body.provider_hints = {};
       if (refId) body.provider_hints.fish_reference_id = refId;
-      body.fish_tts_directive = {
-        text_prefix: prefixEl ? prefixEl.value.trim() : '',
-        prosody: {
-          speed: speedEl ? Number(speedEl.value) : 0.9,
-          volume: volumeEl ? Number(volumeEl.value) : -3,
-        },
-      };
+      body.fish_tts_directive = { text_prefix: prefixEl ? prefixEl.value.trim() : '', prosody: { speed: speedEl ? Number(speedEl.value) : 0.9, volume: volumeEl ? Number(volumeEl.value) : -3 } };
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample', body);
       if (data.ok) {
         var player = voiceContent.querySelector('.voice-sample-player');
-        if (player) {
-          player.innerHTML = '<audio controls src="' + escapeAttr(data.audio_url || data.audio_path) + '"></audio>';
-        }
+        if (player) player.innerHTML = '<audio controls src="' + escapeAttr(data.audio_url || data.audio_path) + '"></audio>';
         showToast('试听已生成', 'success');
       } else {
         showToast(data.error || '生成失败', 'error');
@@ -776,81 +892,70 @@
 
   $('#btn-voice-candidates').addEventListener('click', async function() {
     if (!state.sessionId) return;
-    voiceContent.innerHTML = '<div class="voice-loading">生成三候选……</div>';
+    voiceContent.innerHTML = '<div class="voice-loading">生成三候选音色…</div>';
     try {
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates', {});
-      renderVoiceCandidates(data.candidates || []);
-    } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + e.message + '</div>'; }
+      renderVoiceCandidates(data.candidates || [], data.provider || 'elevenlabs');
+    } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>'; }
   });
 
-  function renderVoiceCandidates(candidates) {
+  function renderVoiceCandidates(candidates, provider) {
+    var isVoiceIdentity = provider === 'elevenlabs';
     var html = '<div class="voice-candidate-list">';
-    html += '<div class="voice-summary">三候选对比</div>';
+    html += '<div class="voice-summary">' + (isVoiceIdentity ? '三候选音色对比' : '表现参数对比') + '</div>';
     candidates.forEach(function(c) {
       html += '<div class="voice-candidate">';
-      html += '<div class="voice-candidate-header"><strong>' + c.label + '</strong>';
-      html += '<span style="font-size:11px;color:var(--text-muted)"> st:' + Math.round(c.stability*100)/100 + ' sb:' + Math.round(c.similarity_boost*100)/100 + '</span>';
+      html += '<div class="voice-candidate-header"><strong>' + escapeHtml(c.label || ('候选 ' + c.index)) + '</strong>';
+      if (c.generated_voice_id) html += '<button class="btn-adopt-idea voice-select-candidate" data-index="' + escapeAttr(c.index || '') + '" data-generated="' + escapeAttr(c.generated_voice_id) + '">选择</button>';
       html += '</div>';
-      if (c.audio_url) {
-        html += '<audio controls src="' + c.audio_url + '" style="width:100%;margin-top:4px"></audio>';
-      } else if (c.error) {
-        html += '<div class="voice-loading" style="color:var(--error)">' + c.error + '</div>';
-      }
+      if (c.audio_url) html += '<audio controls src="' + escapeAttr(c.audio_url) + '" style="width:100%;margin-top:4px"></audio>';
+      else if (c.error) html += '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(c.error) + '</div>';
       html += '</div>';
     });
     html += '</div>';
     voiceContent.innerHTML = html;
+    voiceContent.querySelectorAll('.voice-select-candidate').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        try {
+          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates/select', { index: Number(this.dataset.index || 1), generated_voice_id: this.dataset.generated || '' });
+          if (data.voice_profile) renderVoiceProfile(data.voice_profile);
+          showToast('已保存这个角色音色', 'success');
+        } catch(e) { showToast(e.message, 'error'); }
+      });
+    });
   }
 
   $('#btn-voice-cast').addEventListener('click', async function() {
     if (!state.sessionId) return;
     try {
-      voiceContent.innerHTML = '<div class="voice-loading">正在匹配 Fish 音色底座……</div>';
+      voiceContent.innerHTML = '<div class="voice-loading">正在匹配 Fish 音色底座…</div>';
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-cast', { limit: 8 });
-      if (data.voice_profile) {
-        renderVoiceProfile(data.voice_profile);
-      }
+      if (data.voice_profile) renderVoiceProfile(data.voice_profile);
       renderVoiceCastResult(data);
-      if (data.recommendation) {
-        showToast('已锁定音色: ' + data.recommendation.title, 'success');
-      } else {
-        showToast(data.warning || '没有找到高可信中文音色底座', 'error');
-      }
-    } catch(e) {
-      voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>';
-    }
+      if (data.recommendation) showToast('已锁定音色: ' + data.recommendation.title, 'success');
+      else showToast(data.warning || '没有找到高可信中文音色底座', 'error');
+    } catch(e) { voiceContent.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>'; }
   });
 
   $('#btn-voice-ref-upload').addEventListener('click', async function() {
     if (!state.sessionId) return;
     var fileInput = document.getElementById('voice-ref-file');
     var transcriptInput = document.getElementById('voice-ref-transcript');
-    if (!fileInput.files || !fileInput.files[0]) {
-      showToast('请选择一段中文参考音频', 'error');
-      return;
-    }
+    if (!fileInput.files || !fileInput.files[0]) { showToast('请选择一段中文参考音频', 'error'); return; }
     var transcript = transcriptInput.value.trim();
-    if (!transcript) {
-      showToast('请填写参考音频逐字稿', 'error');
-      return;
-    }
+    if (!transcript) { showToast('请填写参考音频逐字稿', 'error'); return; }
     var form = new FormData();
     form.append('file', fileInput.files[0]);
     form.append('transcript', transcript);
     form.append('label', '角色中文参考音频');
     try {
-      var resp = await fetch('/api/sessions/' + state.sessionId + '/voice-reference', {
-        method: 'POST',
-        body: form,
-      });
+      var resp = await fetch('/api/sessions/' + state.sessionId + '/voice-reference', { method: 'POST', body: form });
       var data = await resp.json();
       if (!resp.ok || data.ok === false) throw new Error(data.error || data.detail || '上传失败');
-      showToast('已绑定参考音频，Fish 将优先使用它生成角色声音', 'success');
+      showToast('已绑定参考音频，Fish 会优先使用它生成角色声音', 'success');
       fileInput.value = '';
       transcriptInput.value = '';
-    } catch(e) {
-      showToast(e.message, 'error');
-    }
+    } catch(e) { showToast(e.message, 'error'); }
   });
 
   async function loadVoiceOptions() {
@@ -872,107 +977,52 @@
       ['声音年龄', vp.voice_age], ['性别倾向', vp.gender_tone], ['音色', vp.timbre],
       ['音高', vp.pitch], ['语速', vp.speed], ['音量', vp.volume],
       ['情绪表达', vp.emotion_level], ['停顿方式', vp.pause_style], ['咬字', vp.articulation],
-      ['距离感', vp.distance_feeling], ['情绪色彩', (vp.emotional_color||[]).join('、')],
+      ['距离感', vp.distance_feeling], ['情绪色彩', (vp.emotional_color || []).join('、')],
     ];
     var grid = '<div class="voice-grid">';
-    fields.forEach(function(f) {
-      grid += '<div class="voice-item"><div class="voice-item-label">'+escapeHtml(f[0])+'</div><div class="voice-item-value">'+escapeHtml(f[1]||'—')+'</div></div>';
-    });
+    fields.forEach(function(f) { grid += '<div class="voice-item"><div class="voice-item-label">'+escapeHtml(f[0])+'</div><div class="voice-item-value">'+escapeHtml(f[1]||'—')+'</div></div>'; });
     grid += '</div>';
-
     var html = '';
     if (vp.voice_summary) html += '<div class="voice-summary">' + escapeHtml(vp.voice_summary) + '</div>';
     if (vp.reason) html += '<div class="voice-reason">' + escapeHtml(vp.reason) + '</div>';
     if (vp.reference_strategy) html += '<div class="voice-fish-note">' + escapeHtml(vp.reference_strategy) + '</div>';
     html += grid;
-    if (vp.sample_text) {
-      html += '<div class="voice-sample"><div class="voice-sample-text">"' + escapeHtml(vp.sample_text) + '"</div>';
-      html += '<div class="voice-sample-player"></div></div>';
-    }
-    if (vp.warnings && vp.warnings.length > 0) {
-      html += '<div class="voice-warnings">' + escapeHtml(vp.warnings.join('; ')) + '</div>';
-    }
+    if (vp.sample_text) html += '<div class="voice-sample"><div class="voice-sample-text">"' + escapeHtml(vp.sample_text) + '"</div><div class="voice-sample-player"></div></div>';
+    if (vp.warnings && vp.warnings.length > 0) html += '<div class="voice-warnings">' + escapeHtml(vp.warnings.join('; ')) + '</div>';
     var hints = vp.provider_hints || {};
     var directive = hints.fish_tts_directive || vp.fish_tts_directive || {};
     var prosody = directive.prosody || {};
     var provider = hints.provider || (voiceOptions && voiceOptions.default_provider) || 'edge_tts';
     var library = (voiceOptions && voiceOptions.fish_voice_library) || [];
-    html += '<div class="voice-provider-section">';
-    html += '<label>试听引擎</label>';
-    html += '<select id="voice-provider-select" class="voice-select">';
-    var providerLabels = {
-      elevenlabs: 'ElevenLabs（专属音色 / 中文 TTS）',
-      edge_tts: 'Edge TTS（按性别/音高自动匹配）',
-      fish_audio: 'Fish Audio（reference_id / 参考音频）',
-    };
-    ((voiceOptions && voiceOptions.providers) || ['elevenlabs', 'edge_tts', 'fish_audio']).forEach(function(name) {
-      html += '<option value="' + escapeAttr(name) + '"' + (provider === name ? ' selected' : '') + '>' + escapeHtml(providerLabels[name] || name) + '</option>';
-    });
-    html += '</select>';
-    html += '</div>';
-    html += '<div class="voice-provider-section">';
-    html += '<label>Fish 音色</label>';
-    html += '<select id="voice-fish-library" class="voice-select">';
-    html += '<option value="">手动填写 reference_id</option>';
-    library.forEach(function(item) {
-      var disabled = item.configured ? '' : ' disabled';
-      var selected = item.reference_id && item.reference_id === hints.fish_reference_id ? ' selected' : '';
-      html += '<option value="' + escapeAttr(item.reference_id) + '"' + disabled + selected + '>' + escapeHtml(item.label + (item.configured ? '' : '（未配置）')) + '</option>';
-    });
-    html += '</select>';
-    html += '</div>';
-    html += '<div class="voice-provider-section">';
-    html += '<label>Fish 表演标签</label>';
-    html += '<input type="text" id="voice-fish-prefix" class="voice-edit-input" placeholder="例如 (calm) (sad)" value="' + escapeAttr(directive.text_prefix || hints.fish_voice_prompt || vp.fish_voice_prompt || '') + '">';
-    html += '</div>';
-    html += '<div class="voice-provider-section">';
-    html += '<label>Fish 语速 / 音量</label>';
-    html += '<div class="voice-prosody-row">';
-    html += '<input type="number" id="voice-fish-speed" class="voice-number-input" min="0.7" max="1.2" step="0.01" value="' + (prosody.speed || 0.9) + '">';
-    html += '<input type="number" id="voice-fish-volume" class="voice-number-input" min="-8" max="3" step="1" value="' + (prosody.volume || -3) + '">';
-    html += '</div>';
-    html += '</div>';
+    html += '<div class="voice-provider-section"><label>试听引擎</label><select id="voice-provider-select" class="voice-select">';
+    var providerLabels = { elevenlabs: 'ElevenLabs（专属音色 / 中文 TTS）', edge_tts: 'Edge TTS（按性别/音高自动匹配）', fish_audio: 'Fish Audio（reference_id / 参考音频）' };
+    ((voiceOptions && voiceOptions.providers) || ['elevenlabs', 'edge_tts', 'fish_audio']).forEach(function(name) { html += '<option value="' + escapeAttr(name) + '"' + (provider === name ? ' selected' : '') + '>' + escapeHtml(providerLabels[name] || name) + '</option>'; });
+    html += '</select></div>';
+    html += '<div class="voice-provider-section"><label>Fish 音色</label><select id="voice-fish-library" class="voice-select"><option value="">手动填写 reference_id</option>';
+    library.forEach(function(item) { var disabled = item.configured ? '' : ' disabled'; var selected = item.reference_id && item.reference_id === hints.fish_reference_id ? ' selected' : ''; html += '<option value="' + escapeAttr(item.reference_id) + '"' + disabled + selected + '>' + escapeHtml(item.label + (item.configured ? '' : '（未配置）')) + '</option>'; });
+    html += '</select></div>';
+    html += '<div class="voice-provider-section"><label>Fish 表演标签</label><input type="text" id="voice-fish-prefix" class="voice-edit-input" placeholder="例如 (calm) (sad)" value="' + escapeAttr(directive.text_prefix || hints.fish_voice_prompt || vp.fish_voice_prompt || '') + '"></div>';
+    html += '<div class="voice-provider-section"><label>Fish 语速 / 音量</label><div class="voice-prosody-row"><input type="number" id="voice-fish-speed" class="voice-number-input" min="0.7" max="1.2" step="0.01" value="' + (prosody.speed || 0.9) + '"><input type="number" id="voice-fish-volume" class="voice-number-input" min="-8" max="3" step="1" value="' + (prosody.volume || -3) + '"></div></div>';
     if (directive.performance_note) html += '<div class="voice-fish-note">' + escapeHtml(directive.performance_note) + '</div>';
     if (directive.avoid && directive.avoid.length) html += '<div class="voice-warnings">避免: ' + escapeHtml(directive.avoid.join('、')) + '</div>';
-    html += '<div class="voice-edit-section">';
-    html += '<input type="text" id="voice-edit-ref" class="voice-edit-input" placeholder="Fish reference_id，例如 8ef4..." value="' + escapeAttr(hints.fish_reference_id || '') + '">';
-    html += '<button id="btn-voice-save" class="btn-search-go">保存设置</button>';
-    html += '</div>';
+    html += '<div class="voice-edit-section"><input type="text" id="voice-edit-ref" class="voice-edit-input" placeholder="Fish reference_id，例如 8ef4..." value="' + escapeAttr(hints.fish_reference_id || '') + '"><button id="btn-voice-save" class="btn-search-go">保存设置</button></div>';
     voiceContent.innerHTML = html;
-
     var librarySelect = document.getElementById('voice-fish-library');
-    if (librarySelect) {
-      librarySelect.addEventListener('change', function() {
-        var refInput = document.getElementById('voice-edit-ref');
-        if (refInput) refInput.value = this.value;
-      });
-    }
-
-    // Wire save button
+    if (librarySelect) librarySelect.addEventListener('change', function() { var refInput = document.getElementById('voice-edit-ref'); if (refInput) refInput.value = this.value; });
     var btnSave = document.getElementById('btn-voice-save');
-    if (btnSave) {
-      btnSave.addEventListener('click', async function() {
-        var providerSelect = document.getElementById('voice-provider-select');
-        var refId = document.getElementById('voice-edit-ref').value.trim();
-        var fishPrefix = document.getElementById('voice-fish-prefix').value.trim();
-        var fishSpeed = Number(document.getElementById('voice-fish-speed').value || 0.9);
-        var fishVolume = Number(document.getElementById('voice-fish-volume').value || -3);
-        var updates = { provider_hints: { provider: providerSelect ? providerSelect.value : 'edge_tts' } };
-        if (refId) {
-          updates.provider_hints.fish_reference_id = refId;
-        }
-        updates.fish_tts_directive = {
-          text_prefix: fishPrefix,
-          prosody: { speed: fishSpeed, volume: fishVolume },
-        };
-        updates.provider_hints.fish_tts_directive = updates.fish_tts_directive;
-        updates.fish_voice_prompt = fishPrefix;
-        try {
-          await apiCall('PATCH', '/api/sessions/' + state.sessionId + '/voice-profile', updates);
-          showToast('已保存', 'success');
-        } catch(e) { showToast(e.message, 'error'); }
-      });
-    }
+    if (btnSave) btnSave.addEventListener('click', async function() {
+      var providerSelect = document.getElementById('voice-provider-select');
+      var refId = document.getElementById('voice-edit-ref').value.trim();
+      var fishPrefix = document.getElementById('voice-fish-prefix').value.trim();
+      var fishSpeed = Number(document.getElementById('voice-fish-speed').value || 0.9);
+      var fishVolume = Number(document.getElementById('voice-fish-volume').value || -3);
+      var updates = { provider_hints: { provider: providerSelect ? providerSelect.value : 'edge_tts' } };
+      if (refId) updates.provider_hints.fish_reference_id = refId;
+      updates.fish_tts_directive = { text_prefix: fishPrefix, prosody: { speed: fishSpeed, volume: fishVolume } };
+      updates.provider_hints.fish_tts_directive = updates.fish_tts_directive;
+      updates.fish_voice_prompt = fishPrefix;
+      try { await apiCall('PATCH', '/api/sessions/' + state.sessionId + '/voice-profile', updates); showToast('已保存', 'success'); } catch(e) { showToast(e.message, 'error'); }
+    });
   }
 
   function renderVoiceCastResult(data) {
@@ -1170,7 +1220,6 @@
   function showAuth() { authOverlay.classList.remove('hidden'); hideError(authError); }
   function hideAuth() { authOverlay.classList.add('hidden'); }
 
-  // Tab switching
   $$('.auth-tab').forEach(function(tab) {
     tab.addEventListener('click', function() {
       $$('.auth-tab').forEach(function(t) { t.classList.remove('active'); });
@@ -1185,7 +1234,6 @@
   btnLogin.addEventListener('click', showAuth);
   btnCloseAuth.addEventListener('click', hideAuth);
 
-  // Login
   $('#btn-login-submit').addEventListener('click', async function() {
     var u = $('#login-username').value.trim();
     var p = $('#login-password').value;
@@ -1201,12 +1249,11 @@
     } catch (e) { showError(authError, e.message); }
   });
 
-  // Register
   $('#btn-register-submit').addEventListener('click', async function() {
     var u = $('#reg-username').value.trim();
     var p = $('#reg-password').value;
-    if (u.length < 3) { showError(authError, '用户名至少3个字符'); return; }
-    if (p.length < 8) { showError(authError, '密码至少8个字符'); return; }
+    if (u.length < 3) { showError(authError, '用户名至少 3 个字符'); return; }
+    if (p.length < 8) { showError(authError, '密码至少 8 个字符'); return; }
     try {
       var nickname = $('#reg-nickname').value.trim() || null;
       var data = await apiCall('POST', '/api/auth/register', { username: u, password: p, nickname: nickname });
@@ -1219,7 +1266,6 @@
     } catch (e) { showError(authError, e.message); }
   });
 
-  // Guest
   $('#btn-guest-submit').addEventListener('click', async function() {
     try {
       var data = await apiCall('POST', '/api/auth/guest');
@@ -1258,6 +1304,7 @@
   }
 
   // Check auth on load
+  // Check auth on load
   var authChecked = false;
   (async function checkAuth() {
     try {
@@ -1286,12 +1333,11 @@
       var input = document.getElementById(this.dataset.target);
       if (input) {
         input.type = input.type === 'password' ? 'text' : 'password';
-        this.textContent = input.type === 'password' ? '👁' : '🙈';
+        this.textContent = input.type === 'password' ? '\u663e\u793a' : '\u9690\u85cf';
       }
     });
   });
   authOverlay.addEventListener('click', function(e) {
     if (e.target === authOverlay && authChecked) hideAuth();
   });
-
 })();

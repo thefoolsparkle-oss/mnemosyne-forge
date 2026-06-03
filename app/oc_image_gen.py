@@ -73,6 +73,40 @@ async def build_image_prompt(draft: OCDraft, style: str = "anime portrait") -> s
         return f"masterpiece, best quality, {style}, {base}, detailed, high quality"
 
 
+async def build_image_variation_prompt(
+    draft: OCDraft,
+    locked_prompt: str,
+    variation: str,
+    style: str = "anime portrait",
+) -> str:
+    """Build a prompt variant that preserves the locked visual canon."""
+    context = _draft_visual(draft)
+    anchor = locked_prompt.strip() if locked_prompt else await build_image_prompt(draft, style)
+    instruction = f"""Character visual canon:
+{anchor}
+
+Character draft:
+{context}
+
+Variation request:
+{variation}
+
+Rewrite a Stable Diffusion prompt in English. Preserve the same character identity, face shape, hair, eye color, outfit anchors, silhouette, age impression, and overall art style. Change only the requested pose/expression/composition details. Return prompt text only."""
+
+    try:
+        prompt = await chat(
+            messages=[{"role": "user", "content": instruction}],
+            system_prompt=IMAGE_PROMPT_SYSTEM,
+            agent="export",
+        )
+        return prompt.strip()
+    except Exception:
+        return (
+            f"{anchor}, same character, consistent face, consistent hairstyle, consistent eyes, "
+            f"consistent outfit, {variation}, {style}, masterpiece, best quality"
+        )
+
+
 async def generate_character_image(
     draft: OCDraft,
     style: str = "anime portrait",

@@ -79,6 +79,32 @@ def _save_markdown(card_data: TavernCardData, path: Path) -> None:
         f.write("\n".join(lines))
 
 
+def _selected_assets(session_id: str) -> dict:
+    """Return selected/generated assets in a compact export-friendly shape."""
+    assets = db.list_assets(session_id)
+    by_type: dict[str, dict] = {}
+    for asset in assets:
+        asset_type = asset.get("asset_type")
+        if not asset_type:
+            continue
+        if asset.get("selected") or asset_type not in by_type:
+            by_type[asset_type] = asset
+
+    image = by_type.get("image_locked") or by_type.get("image_candidate")
+    voice_identity = by_type.get("voice_identity")
+    voice_audio = (
+        by_type.get("voice_sample")
+        or by_type.get("voice_preview")
+        or by_type.get("voice_performance_candidate")
+    )
+    return {
+        "image": image,
+        "voice_identity": voice_identity,
+        "voice_audio": voice_audio,
+        "by_type": by_type,
+    }
+
+
 def _draft_to_prompt_context(draft: OCDraft) -> str:
     """Convert draft to a text summary for the LLM prompt."""
     lines = []
@@ -164,6 +190,7 @@ async def export_card_v2(session_id: str) -> dict:
         return {"ok": False, "error": f"Session not found: {session_id}"}
 
     draft: OCDraft = session_data["draft"]
+    selected_assets = _selected_assets(session_id)
 
     # Generate missing fields via LLM
     generated = await _generate_missing_fields(draft)
@@ -219,6 +246,7 @@ async def export_card_v2(session_id: str) -> dict:
                 "themes": draft.themes,
                 "user_preferences": draft.user_preferences,
                 "draft_version": "0.1",
+                "selected_assets": selected_assets,
             }
         },
     )

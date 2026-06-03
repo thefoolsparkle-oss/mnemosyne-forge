@@ -774,7 +774,220 @@ html, body {
 .history-title-text { color: var(--text-muted); margin: 0 8px; }
 .history-time { color: var(--text-muted); font-size: 11px; }
 
-/* === Voice Panel === */
+/* === Asset and Voice Panels === */
+.asset-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 20, 16, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1900;
+  padding: 24px;
+}
+
+.asset-overlay.hidden { display: none; }
+
+.asset-panel {
+  width: min(980px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 18px;
+  position: relative;
+}
+
+.asset-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.asset-panel-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.asset-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 28px;
+}
+
+.asset-content { min-height: 180px; }
+
+.asset-loading,
+.asset-empty,
+.asset-error {
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.asset-error { color: var(--error); }
+
+.asset-section { margin-bottom: 18px; }
+
+.asset-section h4 {
+  font-size: 13px;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.asset-card {
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+.asset-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.asset-thumb {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+  background: var(--bg-input);
+  display: block;
+}
+
+.asset-card audio {
+  width: 100%;
+  margin-bottom: 8px;
+}
+
+.asset-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.asset-meta strong { color: var(--text-primary); }
+.asset-meta em { color: var(--success); font-style: normal; }
+
+.asset-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+@media (max-width: 760px) {
+  .asset-overlay { padding: 12px; }
+  .asset-grid { grid-template-columns: 1fr; }
+}
+
+.image-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(24, 20, 16, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1900;
+  padding: 24px;
+}
+
+.image-overlay.hidden { display: none; }
+
+.image-panel {
+  width: min(980px, 96vw);
+  max-height: 90vh;
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 18px;
+  position: relative;
+}
+
+.image-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.image-panel-header h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.image-content { min-height: 180px; }
+
+.image-loading,
+.image-empty,
+.image-error {
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.image-error { color: var(--error); }
+
+.image-candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.image-candidate {
+  border: 1px solid var(--border-light);
+  background: var(--bg-card);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+}
+
+.image-candidate-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.image-candidate img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-light);
+  background: var(--bg-input);
+  display: block;
+}
+
+.image-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+@media (max-width: 760px) {
+  .image-overlay { padding: 12px; }
+  .image-candidate-grid { grid-template-columns: 1fr; }
+}
+
 .voice-overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.3);
   display: flex; align-items: center; justify-content: center;
