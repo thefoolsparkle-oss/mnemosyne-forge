@@ -1,8 +1,11 @@
-"""Voice Casting Agent.
+"""Voice Casting Agent — DEPRECATED for main flow.
 
-Selects a stable voice identity for an OC before performance prompting.
-For Fish Audio, this means choosing a reference_id from configured voices or
-public model search. Prompting controls acting; reference_id controls identity.
+This module provides Fish Audio public model search for voice identity matching.
+Since v0.9, the main voice flow uses ElevenLabs Voice Design. This module is
+kept for advanced/debug purposes only — when a user explicitly wants to search
+Fish public models for reference IDs.
+
+Do NOT call this from the main voice UI flow (生成专属音色 / 三候选对比).
 """
 
 from __future__ import annotations

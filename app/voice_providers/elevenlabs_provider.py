@@ -18,7 +18,7 @@ from ..env_utils import read_env
 class ElevenLabsProvider:
     async def synthesize(self, text: str, profile: dict, output_path: str, **kwargs) -> str:
         voice_id = await self.ensure_voice(profile, output_path=output_path)
-        return await self.text_to_speech(text, voice_id, profile, output_path)
+        return await self.text_to_speech(text, voice_id, profile, output_path, **kwargs)
 
     async def ensure_voice(self, profile: dict, output_path: str | None = None) -> str:
         """Return a saved voice_id, creating one from Voice Design when needed."""
@@ -169,7 +169,7 @@ class ElevenLabsProvider:
         self._raise_for_error(resp, "ElevenLabs Create Voice")
         return resp.json()
 
-    async def text_to_speech(self, text: str, voice_id: str, profile: dict, output_path: str) -> str:
+    async def text_to_speech(self, text: str, voice_id: str, profile: dict, output_path: str, **kwargs) -> str:
         from ..config import get_config
 
         cfg = get_config().get("voice", {}).get("elevenlabs", {})
@@ -177,11 +177,21 @@ class ElevenLabsProvider:
         model_id = cfg.get("tts_model_id", "eleven_multilingual_v2")
         output_format = cfg.get("output_format", "mp3_44100_128")
 
+        previous_text = kwargs.get("previous_text", "")
+        next_text = kwargs.get("next_text", "")
+
         payload: dict[str, Any] = {
             "text": text,
             "model_id": model_id,
             "language_code": cfg.get("language_code", "zh"),
-            "voice_settings": self._voice_settings(profile, cfg),
+            "voice_settings": self._apply_performance(
+                profile.get("provider_hints", {}),
+                self._voice_settings(profile, cfg),
+                cfg,
+                unit_index=kwargs.get("unit_index"),
+                previous_text=previous_text,
+                next_text=next_text,
+            ),
         }
         seed = cfg.get("tts_seed")
         if seed is not None and seed != "":
@@ -202,6 +212,40 @@ class ElevenLabsProvider:
         with open(output_path, "wb") as f:
             f.write(resp.content)
         return output_path
+
+    async def synthesize_performance_units(
+        self, profile: dict, output_path: str, **kwargs
+    ) -> list[dict]:
+        """Generate audio for each performance unit with per-unit voice settings.
+
+        Returns a list of {unit_index, clean_text, audio_path, settings_used}.
+        Previous/next text context is passed between units for emotional continuity.
+        """
+        units = profile.get("provider_hints", {}).get("performance_units", [])
+        if not units:
+            voice_id = await self.ensure_voice(profile, output_path=output_path)
+            text = str(profile.get("sample_text") or "你好。")
+            path = await self.text_to_speech(text, voice_id, profile, output_path)
+            return [{"unit_index": 0, "clean_text": text, "audio_path": path, "settings_used": {}}]
+
+        voice_id = await self.ensure_voice(profile, output_path=output_path)
+        results = []
+        for i, unit in enumerate(units):
+            clean_text = str(unit.get("clean_text", "")).strip()
+            if not clean_text:
+                continue
+            unit_path = output_path.replace(".mp3", "") + f"_unit{i}.mp3"
+            prev = units[i - 1].get("clean_text", "") if i > 0 else ""
+            nxt = units[i + 1].get("clean_text", "") if i + 1 < len(units) else ""
+            try:
+                path = await self.text_to_speech(
+                    clean_text, voice_id, profile, unit_path,
+                    unit_index=i, previous_text=prev, next_text=nxt,
+                )
+                results.append({"unit_index": i, "clean_text": clean_text, "audio_path": path})
+            except Exception as e:
+                results.append({"unit_index": i, "clean_text": clean_text, "audio_path": "", "error": str(e)})
+        return results
 
     @staticmethod
     def _api_key(cfg: dict) -> str:
@@ -308,3 +352,90 @@ class ElevenLabsProvider:
             "use_speaker_boost": bool(cfg.get("use_speaker_boost", True)),
             "speed": speed_value,
         }
+
+    @staticmethod
+    def _apply_performance(
+        hints: dict, base_settings: dict, cfg: dict,
+        unit_index: int | None = None,
+        previous_text: str = "",
+        next_text: str = "",
+    ) -> dict:
+        """Apply performance_units from Dialogue Performance Agent to ElevenLabs voice_settings.
+
+        Aggregates emotional direction across all units, mapping:
+          emotion  -> stability / style
+          speed    -> speed
+          volume   -> similarity_boost
+          distance -> stability / style (distant = more restrained)
+          pause    -> applied at the sentence level (future per-unit TTS)
+
+        If unit_index is provided, that unit's emotion/speed/volume dominates.
+        """
+        units = hints.get("performance_units", [])
+        if not units:
+            return base_settings
+
+        settings = dict(base_settings)
+
+        if unit_index is not None and 0 <= unit_index < len(units):
+            units_to_use = [units[unit_index]]
+        else:
+            units_to_use = units
+
+        emotions = [str(u.get("emotion", "")).lower() for u in units_to_use if u.get("emotion")]
+        speeds = [str(u.get("speed", "")).lower() for u in units_to_use if u.get("speed")]
+        volumes = [str(u.get("volume", "")).lower() for u in units_to_use if u.get("volume")]
+        distances = [str(u.get("distance", "")).lower() for u in units_to_use if u.get("distance")]
+
+        dominant = lambda vals: max(set(vals), key=vals.count) if vals else ""
+
+        emotion = dominant(emotions) or "calm"
+        perf_speed = dominant(speeds) or "normal"
+        perf_volume = dominant(volumes) or "normal"
+        perf_distance = dominant(distances) or "casual"
+
+        emotion_params = {
+            "calm":       {"stability": 0.65, "style": 0.10},
+            "restrained": {"stability": 0.70, "style": 0.08},
+            "cold":       {"stability": 0.72, "style": 0.05},
+            "sad":        {"stability": 0.58, "style": 0.15},
+            "tired":      {"stability": 0.62, "style": 0.12},
+            "gentle":     {"stability": 0.55, "style": 0.18},
+            "expressive": {"stability": 0.40, "style": 0.40},
+            "intense":    {"stability": 0.38, "style": 0.45},
+            "angry":      {"stability": 0.35, "style": 0.50},
+        }
+        ep = emotion_params.get(emotion, {"stability": 0.58, "style": 0.22})
+        settings["stability"] = ep["stability"]
+        settings["style"] = ep["style"]
+
+        dist_adjust = {
+            "distant":  {"stability": +0.06, "style": -0.04},
+            "intimate": {"stability": -0.05, "style": +0.06},
+            "formal":   {"stability": +0.04, "style": -0.02},
+        }.get(perf_distance, {})
+        settings["stability"] = max(0.0, min(1.0, settings["stability"] + dist_adjust.get("stability", 0)))
+        settings["style"] = max(0.0, min(1.0, settings["style"] + dist_adjust.get("style", 0)))
+
+        speed_map = {
+            "very_slow": 0.80, "slow": 0.88, "normal": 0.98,
+            "fast": 1.08, "very_fast": 1.14,
+        }
+        settings["speed"] = speed_map.get(perf_speed, settings.get("speed", 0.95))
+
+        vol_boost_map = {"whisper": 0.72, "soft": 0.76, "normal": 0.82, "loud": 0.88}
+        settings["similarity_boost"] = vol_boost_map.get(perf_volume, settings.get("similarity_boost", 0.82))
+
+        # Contextual continuity: previous_text / next_text modulate emotional baseline
+        if previous_text and len(previous_text) < 200:
+            prev_lower = previous_text.lower()
+            if any(w in prev_lower for w in ["?", "!", "?"]):
+                settings["stability"] = min(1.0, settings["stability"] - 0.05)
+            if any(w in prev_lower for w in ["...", ".."]):
+                settings["stability"] = min(1.0, settings["stability"] + 0.03)
+        if next_text and len(next_text) < 200:
+            next_lower = next_text.lower()
+            if any(w in next_lower for w in ["?", "!", "?"]):
+                settings["style"] = min(1.0, settings["style"] + 0.03)
+
+        return settings

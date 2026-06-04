@@ -61,14 +61,17 @@ if ($LASTEXITCODE -ne 0) {
     & $PythonExe -m pip install -r requirements.txt
 }
 
-# Clean old processes
-Get-Process -Name "python*","cloudflared*" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+# Clean only our own server (by port match)
+$oldServer = Get-WmiObject Win32_Process -Filter "CommandLine LIKE '%uvicorn app.server:app%port 8010%'" -ErrorAction SilentlyContinue
+if ($oldServer) { $oldServer.Terminate() | Out-Null }
 Start-Sleep -Seconds 1
 Remove-Item -Path "app\__pycache__" -Recurse -Force -ErrorAction SilentlyContinue
 
-# Start server
+# Start server (no --reload for stability)
+$reloadFlag = if ($args -contains "-Reload") { @("--reload") } else { @() }
 Write-Host "Starting server on http://127.0.0.1:8010 ..." -ForegroundColor Cyan
-Start-Process -FilePath $PythonExe -ArgumentList "-u","-m","uvicorn","app.server:app","--host","127.0.0.1","--port","8010","--reload" -WindowStyle Hidden
+$proc = Start-Process -FilePath $PythonExe -ArgumentList @("-u","-m","uvicorn","app.server:app","--host","127.0.0.1","--port","8010") + $reloadFlag -WindowStyle Hidden -PassThru
+$proc.Id | Out-File ".server.pid" -Encoding ASCII
 Start-Sleep -Seconds 3
 
 # Start cloudflared tunnel
@@ -86,7 +89,7 @@ if (Test-Path $cloudflared) {
 }
 
 Write-Host "Local URL: http://127.0.0.1:8010" -ForegroundColor Cyan
-Write-Host "Press any key to close this window. To stop later, run: Stop-Process -Name python*,cloudflared*" -ForegroundColor Yellow
+Write-Host "Press any key to close this window. To stop later, run: Stop-Process -Id (Get-Content .server.pid)" -ForegroundColor Yellow
 
 # Keep window open
 $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")

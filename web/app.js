@@ -111,15 +111,15 @@
     try {
       resp = await fetch(url, opts);
     } catch (e) {
-      throw new Error('\u65e0\u6cd5\u8fde\u63a5\u670d\u52a1\u5668\uff0c\u8bf7\u786e\u8ba4\u540e\u7aef\u5df2\u542f\u52a8 (http://127.0.0.1:8010)');
+      throw new Error('无法连接服务器，请确认后端已启动 (http://127.0.0.1:8010)');
     }
     if (!resp.ok) {
-      if (resp.status === 500) throw new Error('\u670d\u52a1\u5668\u5185\u90e8\u9519\u8bef\uff0c\u8bf7\u67e5\u770b\u7ec8\u7aef\u65e5\u5fd7');
-      if (resp.status === 404) throw new Error('\u4f1a\u8bdd\u4e0d\u5b58\u5728\u6216\u5df2\u8fc7\u671f');
-      throw new Error('\u8bf7\u6c42\u5931\u8d25 (' + resp.status + ')');
+      if (resp.status === 500) throw new Error('服务器内部错误，请查看终端日志');
+      if (resp.status === 404) throw new Error('会话不存在或已过期');
+      throw new Error('请求失败 (' + resp.status + ')');
     }
     const data = await resp.json();
-    if (data.ok === false) throw new Error(data.error || data.detail || '\u8bf7\u6c42\u5931\u8d25');
+    if (data.ok === false) throw new Error(data.error || data.detail || '请求失败');
     return data;
   }
 
@@ -172,7 +172,7 @@
     div.id = 'thinking-msg';
     const bubble = document.createElement('div');
     bubble.className = 'msg-bubble';
-    bubble.innerHTML = '\u601d\u8003\u4e2d<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
+    bubble.innerHTML = '思考中<span class="dots"><span>.</span><span>.</span><span>.</span></span>';
     div.appendChild(bubble);
     chatMessages.appendChild(div);
     scrollToBottom();
@@ -188,31 +188,31 @@
   }
 
   const STAGE_LABELS = {
-    core_concept: '\u6838\u5fc3\u6982\u5ff5',
-    personality: '\u6027\u683c\u5851\u9020',
-    appearance: '\u5916\u8c8c\u63cf\u8ff0',
-    background: '\u80cc\u666f\u6545\u4e8b',
-    abilities: '\u80fd\u529b\u8bbe\u5b9a',
-    relationships: '\u4eba\u9645\u5173\u7cfb',
-    speaking_style: '\u8bf4\u8bdd\u65b9\u5f0f',
-    scenario: '\u4f7f\u7528\u573a\u666f',
-    opening: '\u5f00\u573a\u8bbe\u8ba1',
-    final_review: '\u6700\u7ec8\u786e\u8ba4',
+    core_concept: '核心概念',
+    personality: '性格塑造',
+    appearance: '外貌描述',
+    background: '背景故事',
+    abilities: '能力设定',
+    relationships: '人际关系',
+    speaking_style: '说话方式',
+    scenario: '使用场景',
+    opening: '开场设计',
+    final_review: '最终确认',
   };
 
   const FIELD_LABELS = {
-    name: '\u540d\u5b57',
-    core_concept: '\u6838\u5fc3\u6982\u5ff5',
-    personality: '\u6027\u683c',
-    appearance: '\u5916\u8c8c',
-    background: '\u80cc\u666f',
-    speaking_style: '\u8bf4\u8bdd\u65b9\u5f0f',
-    scenario: '\u573a\u666f',
-    abilities: '\u80fd\u529b',
-    weaknesses: '\u5f31\u70b9',
-    relationships: '\u5173\u7cfb',
-    first_message: '\u5f00\u573a\u767d',
-    example_dialogue: '\u793a\u4f8b\u5bf9\u8bdd',
+    name: '名字',
+    core_concept: '核心概念',
+    personality: '性格',
+    appearance: '外貌',
+    background: '背景',
+    speaking_style: '说话方式',
+    scenario: '场景',
+    abilities: '能力',
+    weaknesses: '弱点',
+    relationships: '关系',
+    first_message: '开场白',
+    example_dialogue: '示例对话',
   };
 
   function updateDraftPanel(draft) {
@@ -226,10 +226,10 @@
       const isListField = ['personality','abilities','weaknesses','relationships','themes','tags'].includes(field);
       if (isListField) {
         if (Array.isArray(val) && val.length > 0) {
-          valueEl.textContent = val.join('\u3001');
+          valueEl.textContent = val.join('、');
           valueEl.classList.remove('empty');
         } else {
-          valueEl.textContent = '\u5f85\u8865\u5145';
+          valueEl.textContent = '待补充';
           valueEl.classList.add('empty');
         }
       } else if (val && typeof val === 'string' && val.trim()) {
@@ -239,7 +239,7 @@
         valueEl.textContent = String(val);
         valueEl.classList.remove('empty');
       } else {
-        valueEl.textContent = '\u5f85\u8865\u5145';
+        valueEl.textContent = '待补充';
         valueEl.classList.add('empty');
       }
       if (draft.locked_fields && draft.locked_fields.includes(field)) el.classList.add('locked');
@@ -254,11 +254,11 @@
           var input = document.createElement(isList ? 'input' : 'textarea');
           input.className = 'field-edit';
           if (isList) {
-            input.value = Array.isArray(currentVal) ? currentVal.join('\u3001') : '';
-            input.placeholder = '\u7528\u987f\u53f7\u6216\u9017\u53f7\u5206\u9694';
+            input.value = Array.isArray(currentVal) ? currentVal.join('、') : '';
+            input.placeholder = '用顿号或逗号分隔';
           } else {
             input.value = (typeof currentVal === 'string') ? currentVal : '';
-            input.placeholder = '\u8f93\u5165\u5185\u5bb9...';
+            input.placeholder = '输入内容...';
             input.rows = 3;
           }
           valEl.replaceWith(input);
@@ -266,14 +266,14 @@
           async function saveEdit() {
             var newVal = input.value.trim();
             var update = {};
-            if (isList) update[field] = newVal ? newVal.split(/[\u3001,，]/).map(function(s) { return s.trim(); }).filter(Boolean) : [];
+            if (isList) update[field] = newVal ? newVal.split(/[、,，]/).map(function(s) { return s.trim(); }).filter(Boolean) : [];
             else update[field] = newVal || null;
             try {
               var data = await apiCall('PATCH', '/api/sessions/' + state.sessionId + '/draft', { updates: update });
               if (data.draft) updateDraftPanel(data.draft);
-              showToast('\u5df2\u4fdd\u5b58', 'success');
+              showToast('已保存', 'success');
             } catch (e) {
-              showToast('\u4fdd\u5b58\u5931\u8d25: ' + e.message, 'error');
+              showToast('保存失败: ' + e.message, 'error');
               updateDraftPanel(state.draft);
             }
           }
@@ -289,11 +289,11 @@
     const pct = Math.round(score * 100);
     var coreFields = ['name','core_concept','personality','appearance','background'];
     var filled = coreFields.filter(function(f) { return draft[f] && (typeof draft[f] !== 'object' || draft[f].length > 0); }).length;
-    $('#completion-detail').textContent = '\u6838\u5fc3\u5b57\u6bb5 ' + filled + '/' + coreFields.length;
+    $('#completion-detail').textContent = '核心字段 ' + filled + '/' + coreFields.length;
     $('#completion-percent').textContent = pct + '%';
     $('#progress-fill').style.width = pct + '%';
     var draftTitle = draft.name || draft.core_concept;
-    $('.draft-title').textContent = draftTitle ? '\u89d2\u8272 · ' + draftTitle.slice(0, 15) : '\u89d2\u8272\u8349\u7a3f';
+    $('.draft-title').textContent = draftTitle ? '角色 · ' + draftTitle.slice(0, 15) : '角色草稿';
     const stage = draft.current_stage || 'core_concept';
     $('#current-stage').textContent = STAGE_LABELS[stage] || stage;
   }
@@ -410,9 +410,30 @@
       }
       var assetsEl = document.getElementById('card-assets');
       var assetHtml = '';
-      if (selectedAssets.image) assetHtml += '<p>立绘: 已锁定</p>';
-      if (selectedAssets.voice_identity) assetHtml += '<p>声音: ' + (selectedAssets.voice_identity.voice_id ? '已锁定' : '未锁定') + '</p>';
+      if (selectedAssets.image) {
+        var img = selectedAssets.image;
+        var imgName = (img.path || '').split(/[/\\]/).pop();
+        var meta = img.metadata_json ? (typeof img.metadata_json === 'string' ? JSON.parse(img.metadata_json) : img.metadata_json) : (img.metadata || {});
+        assetHtml += '<div class="card-asset-item"><strong>立绘</strong><br>';
+        if (imgName) assetHtml += '<img src="/exports/images/' + imgName + '" style="max-width:120px;border-radius:6px;margin:4px 0">';
+        if (meta.prompt) assetHtml += '<span style="font-size:11px;color:var(--text-muted)">' + escapeHtml((meta.prompt || '').slice(0, 80)) + '</span>';
+        assetHtml += '</div>';
+      }
+      if (selectedAssets.voice_identity) {
+        var v = selectedAssets.voice_identity;
+        var vMeta = v.metadata_json ? (typeof v.metadata_json === 'string' ? JSON.parse(v.metadata_json) : v.metadata_json) : (v.metadata || {});
+        var voiceName = vMeta.voice_name || (v.path || '').slice(0, 16);
+        var voiceId = (v.path || '').split(/[/\\]/).pop() || voiceName;
+        assetHtml += '<div class="card-asset-item"><strong>声音</strong><br>';
+        assetHtml += '<span style="font-size:11px">' + escapeHtml(voiceName) + ' (' + escapeHtml(voiceId.slice(0, 12)) + '...)</span>';
+        assetHtml += '</div>';
+      }
+      if (selectedAssets.voice_audio) {
+        var aName = (selectedAssets.voice_audio.path || '').split(/[/\\]/).pop();
+        assetHtml += '<audio controls src="/exports/voices/' + aName + '" style="width:100%;margin-top:4px"></audio>';
+      }
       assetsEl.innerHTML = assetHtml || '<p style="color:var(--text-muted)">暂无绑定资产</p>';
+      wireExclusiveAudio(assetsEl);
       assetSection.classList.remove('hidden');
     }
   }
@@ -627,14 +648,14 @@
 
   function assetTypeLabel(type) {
     var labels = {
-      image_candidate: '\u7acb\u7ed8\u5019\u9009',
-      image_locked: '\u5df2\u9501\u5b9a\u7acb\u7ed8',
-      voice_preview: '\u58f0\u97f3\u5019\u9009',
-      voice_identity: '\u5df2\u9501\u5b9a\u58f0\u97f3',
-      voice_sample: '\u8bd5\u542c\u6837\u672c',
-      voice_performance_candidate: '\u8868\u6f14\u5019\u9009',
+      image_candidate: '立绘候选',
+      image_locked: '已锁定立绘',
+      voice_preview: '声音候选',
+      voice_identity: '已锁定声音',
+      voice_sample: '试听样本',
+      voice_performance_candidate: '表演候选',
     };
-    return labels[type] || type || '\u672a\u5206\u7c7b';
+    return labels[type] || type || '未分类';
   }
 
   function ensureAssetOverlay() {
@@ -644,9 +665,9 @@
     assetOverlay.innerHTML =
       '<div class="asset-panel">' +
         '<div class="asset-panel-header">' +
-          '<h3>\u8d44\u4ea7\u5386\u53f2</h3>' +
+          '<h3>资产历史</h3>' +
           '<div class="asset-panel-actions">' +
-            '<button type="button" class="btn-adopt-idea" id="btn-asset-cleanup">\u6e05\u7406\u672a\u9009</button>' +
+            '<button type="button" class="btn-adopt-idea" id="btn-asset-cleanup">清理未选</button>' +
             '<button type="button" class="btn-close-card" id="btn-asset-close">&times;</button>' +
           '</div>' +
         '</div>' +
@@ -658,10 +679,10 @@
       assetOverlay.classList.add('hidden');
     });
     assetOverlay.querySelector('#btn-asset-cleanup').addEventListener('click', async function() {
-      if (!state.sessionId || !confirm('\u6e05\u7406\u672a\u9009\u5019\u9009\u8d44\u4ea7\uff1f\u5df2\u9501\u5b9a\u7684\u56fe\u50cf\u548c\u58f0\u97f3\u4f1a\u4fdd\u7559\u3002')) return;
+      if (!state.sessionId || !confirm('清理未选候选资产？已锁定的图像和声音会保留。')) return;
       try {
         var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/assets/cleanup', { keep_selected: true });
-        showToast('\u5df2\u6e05\u7406 ' + (data.removed_records || 0) + ' \u6761\u8d44\u4ea7\u8bb0\u5f55', 'success');
+        showToast('已清理 ' + (data.removed_records || 0) + ' 条资产记录', 'success');
         await loadAssets();
       } catch(e) { showToast(e.message, 'error'); }
     });
@@ -672,7 +693,7 @@
 
   function renderAssets(assets) {
     if (!assets.length) {
-      assetContent.innerHTML = '<div class="asset-empty">\u8fd8\u6ca1\u6709\u751f\u6210\u8d44\u4ea7\u3002</div>';
+      assetContent.innerHTML = '<div class="asset-empty">还没有生成资产。</div>';
       return;
     }
     var grouped = {};
@@ -696,14 +717,14 @@
         html += '<strong>' + escapeHtml(meta.label || assetTypeLabel(type)) + '</strong>';
         html += '<span>' + escapeHtml(asset.provider || '') + '</span>';
         if (asset.created_at) html += '<span>' + escapeHtml(new Date(asset.created_at).toLocaleString('zh-CN')) + '</span>';
-        if (asset.selected) html += '<em>\u5df2\u9009\u4e2d</em>';
+        if (asset.selected) html += '<em>已选中</em>';
         html += '</div><div class="asset-actions">';
         if (type === 'image_locked') {
-          html += '<button type="button" class="btn-adopt-idea asset-variation-image" data-id="' + escapeAttr(asset.id) + '">\u751f\u6210\u53d8\u4f53</button>';
+          html += '<button type="button" class="btn-adopt-idea asset-variation-image" data-id="' + escapeAttr(asset.id) + '">生成变体</button>';
         } else if (type === 'image_candidate') {
-          html += '<button type="button" class="btn-adopt-idea asset-lock-image" data-id="' + escapeAttr(asset.id) + '" data-style="' + escapeAttr(meta.style || '') + '" data-prompt="' + escapeAttr(meta.prompt || '') + '">\u9501\u5b9a\u4e3a canon</button>';
+          html += '<button type="button" class="btn-adopt-idea asset-lock-image" data-id="' + escapeAttr(asset.id) + '" data-style="' + escapeAttr(meta.style || '') + '" data-prompt="' + escapeAttr(meta.prompt || '') + '">锁定为 canon</button>';
         } else {
-          html += '<button type="button" class="btn-adopt-idea asset-select" data-id="' + escapeAttr(asset.id) + '" data-type="' + escapeAttr(type) + '">\u9009\u4e2d</button>';
+          html += '<button type="button" class="btn-adopt-idea asset-select" data-id="' + escapeAttr(asset.id) + '" data-type="' + escapeAttr(type) + '">选中</button>';
         }
         html += '</div></article>';
       });
@@ -720,7 +741,7 @@
             style: this.dataset.style || '',
             prompt: this.dataset.prompt || '',
           });
-          showToast(data.ok ? '\u5df2\u9501\u5b9a\u89c6\u89c9 canon' : '\u9501\u5b9a\u5931\u8d25', data.ok ? 'success' : 'error');
+          showToast(data.ok ? '已锁定视觉 canon' : '锁定失败', data.ok ? 'success' : 'error');
           await loadAssets();
         } catch(e) { showToast(e.message, 'error'); }
       });
@@ -730,7 +751,7 @@
         try {
           ensureImageOverlay();
           imageOverlay.classList.remove('hidden');
-          imageContent.innerHTML = '<div class="image-loading">\u6b63\u5728\u57fa\u4e8e\u5df2\u9501\u5b9a\u7acb\u7ed8\u751f\u6210\u4e00\u81f4\u6027\u53d8\u4f53\u2026</div>';
+          imageContent.innerHTML = '<div class="image-loading">正在基于已锁定立绘生成一致性变体…</div>';
           var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-variations', {});
           renderImageCandidates(data.candidates || []);
           await loadAssets();
@@ -741,7 +762,7 @@
       btn.addEventListener('click', async function() {
         try {
           await apiCall('POST', '/api/sessions/' + state.sessionId + '/assets/' + this.dataset.id + '/select', { asset_type: this.dataset.type || '' });
-          showToast('\u5df2\u9009\u4e2d\u8d44\u4ea7', 'success');
+          showToast('已选中资产', 'success');
           await loadAssets();
         } catch(e) { showToast(e.message, 'error'); }
       });
@@ -751,7 +772,7 @@
   async function loadAssets() {
     if (!state.sessionId) return;
     ensureAssetOverlay();
-    assetContent.innerHTML = '<div class="asset-loading">\u6b63\u5728\u8bfb\u53d6\u8d44\u4ea7\u2026</div>';
+    assetContent.innerHTML = '<div class="asset-loading">正在读取资产…</div>';
     var data = await apiCall('GET', '/api/sessions/' + state.sessionId + '/assets');
     renderAssets(data.assets || []);
   }
@@ -763,7 +784,7 @@
     btn.id = 'btn-assets';
     btn.className = 'btn-draft-action';
     btn.type = 'button';
-    btn.textContent = '\u8d44\u4ea7\u5386\u53f2';
+    btn.textContent = '资产历史';
     btn.addEventListener('click', async function() {
       if (!state.sessionId) return;
       ensureAssetOverlay();
@@ -794,7 +815,7 @@
     imageOverlay.innerHTML =
       '<div class="image-panel">' +
         '<div class="image-panel-header">' +
-          '<h3>\u7acb\u7ed8\u5019\u9009</h3>' +
+          '<h3>立绘候选</h3>' +
           '<button type="button" class="btn-close-card" id="btn-image-close">&times;</button>' +
         '</div>' +
         '<div id="image-content" class="image-content"></div>' +
@@ -811,13 +832,13 @@
 
   function renderImageCandidates(candidates) {
     if (!candidates.length) {
-      imageContent.innerHTML = '<div class="image-empty">\u6ca1\u6709\u751f\u6210\u53ef\u7528\u5019\u9009\u3002</div>';
+      imageContent.innerHTML = '<div class="image-empty">没有生成可用候选。</div>';
       return;
     }
     var html = '<div class="image-candidate-grid">';
     candidates.forEach(function(c) {
       html += '<div class="image-candidate">';
-      html += '<div class="image-candidate-title">' + escapeHtml(c.label || ('\u5019\u9009 ' + c.index)) + '</div>';
+      html += '<div class="image-candidate-title">' + escapeHtml(c.label || ('候选 ' + c.index)) + '</div>';
       if (c.image_url) {
         html += '<img src="' + escapeAttr(c.image_url) + '" alt="' + escapeAttr(c.label || 'image candidate') + '">';
         if (c.critique && c.critique.overall_score) {
@@ -829,15 +850,15 @@
         html += '<div class="image-error">';
         html += '<strong>' + escapeHtml(c.label || '生成失败') + '</strong><br>';
         html += escapeHtml(c.error || '未知错误') + '<br>';
-        html += '<button class="btn-adopt-idea image-retry-btn" data-style="' + escapeAttr(c.style || '') + '">重试此风格</button>';
+        html += '<button class="btn-adopt-idea image-retry-btn" data-style="' + escapeAttr(c.style || '') + '" data-prompt="' + escapeAttr(c.prompt || '') + '" data-neg-prompt="' + escapeAttr(c.negative_prompt || '') + '">重试此风格</button>';
         html += '</div>';
       }
       html += '<div class="image-candidate-actions">';
       if (c.asset_id) {
-        html += '<button type="button" class="btn-adopt-idea image-lock-btn" data-asset="' + escapeAttr(c.asset_id) + '" data-style="' + escapeAttr(c.style || '') + '" data-prompt="' + escapeAttr(c.prompt || '') + '">\u9501\u5b9a</button>';
+        html += '<button type="button" class="btn-adopt-idea image-lock-btn" data-asset="' + escapeAttr(c.asset_id) + '" data-style="' + escapeAttr(c.style || '') + '" data-prompt="' + escapeAttr(c.prompt || '') + '">锁定</button>';
       }
       if (c.prompt) {
-        html += '<button type="button" class="btn-adopt-idea image-copy-btn" data-prompt="' + escapeAttr(c.prompt) + '">\u590d\u5236 Prompt</button>';
+        html += '<button type="button" class="btn-adopt-idea image-copy-btn" data-prompt="' + escapeAttr(c.prompt) + '">复制 Prompt</button>';
       }
       html += '</div></div>';
     });
@@ -852,16 +873,20 @@
             style: this.dataset.style || '',
             prompt: this.dataset.prompt || '',
           });
-          showToast(data.ok ? '\u5df2\u9501\u5b9a\u89d2\u8272\u89c6\u89c9 canon' : '\u9501\u5b9a\u5931\u8d25', data.ok ? 'success' : 'error');
+          showToast(data.ok ? '已锁定角色视觉 canon' : '锁定失败', data.ok ? 'success' : 'error');
         } catch(e) { showToast(e.message, 'error'); }
       });
     });
     imageContent.querySelectorAll('.image-retry-btn').forEach(function(btn) {
       btn.addEventListener('click', async function() {
         var style = this.dataset.style;
+        var prompt = this.dataset.prompt;
+        var negPrompt = this.dataset['neg-prompt'] || this.dataset.negPrompt || '';
         showToast('正在重试「' + escapeHtml(style) + '」风格……', 'success');
         try {
-          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', { style: style });
+          var retryBody = { retry_style: style };
+          if (prompt) { retryBody.retry_prompt = prompt; retryBody.retry_negative_prompt = negPrompt; }
+          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', retryBody);
           renderImageCandidates(data.candidates || []);
         } catch(e) { showToast(e.message, 'error'); }
       });
@@ -869,9 +894,9 @@
     imageContent.querySelectorAll('.image-copy-btn').forEach(function(btn) {
       btn.addEventListener('click', function() {
         navigator.clipboard.writeText(this.dataset.prompt || '').then(function() {
-          showToast('Prompt \u5df2\u590d\u5236', 'success');
+          showToast('Prompt 已复制', 'success');
         }).catch(function() {
-          showToast('\u590d\u5236\u5931\u8d25', 'error');
+          showToast('复制失败', 'error');
         });
       });
     });
@@ -881,7 +906,7 @@
     if (!state.sessionId) return;
     ensureImageOverlay();
     imageOverlay.classList.remove('hidden');
-    imageContent.innerHTML = '<div class="image-loading">\u6b63\u5728\u751f\u6210\u4e09\u5f20\u5019\u9009\u7acb\u7ed8\u2026</div>';
+    imageContent.innerHTML = '<div class="image-loading">正在生成三张候选立绘…</div>';
     try {
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', {});
       renderImageCandidates(data.candidates || []);
@@ -893,10 +918,10 @@
   $('#btn-bridge').addEventListener('click', async function() {
     if (!state.sessionId) return;
     try {
-      showToast('\u6b63\u5728\u5bfc\u5165\u5fc6\u754c\u6811\u2026', 'success');
+      showToast('正在导入忆界树…', 'success');
       var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/import-to-mnemosyne', {});
-      if (data.ok) showToast(data.message || '\u5df2\u5bfc\u5165\u5fc6\u754c\u6811', 'success');
-      else showToast(data.error || '\u5bfc\u5165\u5931\u8d25', 'error');
+      if (data.ok) showToast(data.message || '已导入忆界树', 'success');
+      else showToast(data.error || '导入失败', 'error');
     } catch(e) { showToast(e.message, 'error'); }
   });
 
@@ -928,6 +953,19 @@
 
   $('#btn-voice-generate').addEventListener('click', async function() {
     if (!state.sessionId) return;
+    // P0: check provider select for ElevenLabs voice_id requirement
+    var providerEl = document.getElementById('voice-provider-select');
+    var provider = providerEl ? providerEl.value : ((voiceOptions && voiceOptions.default_provider) || 'elevenlabs');
+    if (provider === 'elevenlabs') {
+      try {
+        var profileResp = await apiCall('GET', '/api/sessions/' + state.sessionId + '/voice-profile');
+        var hints = (profileResp.voice_profile || {}).provider_hints || {};
+        if (!hints.elevenlabs_voice_id) {
+          showToast('请先生成专属音色并选定一个，再试听', 'error');
+          return;
+        }
+      } catch(e) { /* proceed to TTS anyway */ }
+    }
     try {
       var providerEl = document.getElementById('voice-provider-select');
       var provider = providerEl ? providerEl.value : ((voiceOptions && voiceOptions.default_provider) || 'elevenlabs');
@@ -994,7 +1032,7 @@
   $('#btn-voice-advanced-toggle').addEventListener('click', function() {
     var adv = $('#voice-advanced');
     var hidden = adv.classList.toggle('hidden');
-    this.textContent = hidden ? '\u25B8 \u9AD8\u7EA7\uFF1AFish Audio / \u53C2\u8003\u97F3\u9891' : '\u25BE \u9AD8\u7EA7\uFF1AFish Audio / \u53C2\u8003\u97F3\u9891';
+    this.textContent = hidden ? '▸ 高级：Fish Audio / 参考音频' : '▾ 高级：Fish Audio / 参考音频';
   });
 
   $('#btn-voice-cast').addEventListener('click', async function() {
@@ -1099,6 +1137,9 @@
     });
   }
 
+  // DEPRECATED: renderVoiceCastResult was for old Fish Audio public model casting.
+  // Main voice flow is now ElevenLabs Voice Design via renderVoiceCandidates.
+  // This function is retained for reference but not called from active UI.
   function renderVoiceCastResult(data) {
     var candidates = data.candidates || [];
     var box = document.createElement('div');
@@ -1433,7 +1474,7 @@
       var input = document.getElementById(this.dataset.target);
       if (input) {
         input.type = input.type === 'password' ? 'text' : 'password';
-        this.textContent = input.type === 'password' ? '\u663e\u793a' : '\u9690\u85cf';
+        this.textContent = input.type === 'password' ? '显示' : '隐藏';
       }
     });
   });

@@ -74,9 +74,20 @@ async def health():
 @app.post("/shutdown")
 async def shutdown(user: dict[str, Any] = Depends(auth.current_admin)):
     """Gracefully shut down the server (admin only)."""
-    import os, signal
-    os.kill(os.getpid(), signal.SIGTERM)
+    import sys, os
+    # Return response before killing process
+    import asyncio
+    asyncio.create_task(_delayed_shutdown())
     return {"ok": True, "message": "Shutting down..."}
+
+
+async def _delayed_shutdown():
+    import asyncio, os, signal, sys
+    await asyncio.sleep(0.5)
+    if hasattr(signal, 'SIGTERM'):
+        os.kill(os.getpid(), signal.SIGTERM)
+    else:
+        sys.exit(0)
 
 
 # --- Sessions ---
@@ -360,6 +371,7 @@ async def image_prompt_direct(session_id: str, body: dict, user: dict[str, Any] 
 
 @app.post("/api/sessions/{session_id}/image-critique")
 async def image_critique(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    _require_session_access(session_id, user)
     from .oc_image_critic import critique_image_prompt
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
@@ -374,13 +386,14 @@ async def dialogue_performance(body: dict, user: dict[str, Any] = Depends(auth.c
     draft = None
     session_id = body.get("session_id")
     if session_id:
+        _require_session_access(str(session_id), user)
         draft = await oc_session.get_session_draft(str(session_id))
     result = await analyze_performance(body.get("text", ""), draft)
     return {"ok": True, "performance": result}
 
 
 @app.post("/api/migrate-voice-profiles")
-async def migrate_voice_profiles(user: dict[str, Any] = Depends(auth.current_user)):
+async def migrate_voice_profiles(user: dict[str, Any] = Depends(auth.current_admin)):
     """Clean up legacy Fish provider hints when ElevenLabs is the default."""
     cfg = get_config()
     if cfg.get("voice", {}).get("provider") != "elevenlabs":
@@ -477,7 +490,7 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
     from .oc_image_gen import generate_character_image
     from .oc_visual_identity import analyze_visual_identity
     from .oc_image_prompt_director import direct_image_prompt
-    from .oc_image_critic import critique_image_prompt
+    from .oc_image_critic import critique_image_prompt, critique_image_result
     from pathlib import Path
     _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
@@ -485,21 +498,41 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Use Visual Identity + Prompt Director for structured prompts
-    visual = await analyze_visual_identity(draft)
-    directed = await direct_image_prompt(draft, visual)
-    variations = directed.get("variations", [])
-    if not variations:
-        variations = [
-            {"style": "anime character key visual", "positive_prompt": directed.get("positive_prompt", "")},
-            {"style": "anime portrait cinematic rim light", "positive_prompt": directed.get("positive_prompt", "")},
-            {"style": "game character concept art", "positive_prompt": directed.get("positive_prompt", "")},
-        ]
+    retry_style = body.get("retry_style", "")
+    retry_prompt = body.get("retry_prompt", "")
+    retry_negative_prompt = body.get("retry_negative_prompt", "")
+
+    if retry_style and retry_prompt:
+        # Retry with exact original prompt — skip Visual Identity + Director
+        variations = [{"style": retry_style, "positive_prompt": retry_prompt, "negative_prompt": retry_negative_prompt}]
+    else:
+        visual = await analyze_visual_identity(draft)
+        directed = await direct_image_prompt(draft, visual)
+        variations = directed.get("variations", [])
+        if retry_style:
+            original = next((v for v in variations if v.get("style") == retry_style), None)
+            if not original:
+                original = {"style": retry_style, "positive_prompt": directed.get("positive_prompt", "")}
+            variations = [original]
+        elif not variations:
+            variations = [
+                {"style": "anime character key visual", "positive_prompt": directed.get("positive_prompt", "")},
+                {"style": "anime portrait cinematic rim light", "positive_prompt": directed.get("positive_prompt", "")},
+                {"style": "game character concept art", "positive_prompt": directed.get("positive_prompt", "")},
+            ]
 
     candidates = []
     for i, v in enumerate(variations[:3]):
         try:
             result = await generate_character_image(draft, v.get("style", "anime"), prompt=v.get("positive_prompt", ""))
             critique = await critique_image_prompt(draft, v.get("positive_prompt", ""), v.get("negative_prompt", ""))
+            result_critique = {"note": "result_image_critique_not_available"}
+            if result.get("ok") and result.get("image_path"):
+                try:
+                    result_critique = await critique_image_result(draft, result["image_path"],
+                        v.get("positive_prompt", ""), v.get("negative_prompt", ""))
+                except Exception:
+                    pass
             image_url = ""
             asset_id = None
             if result.get("ok") and result.get("image_path"):
@@ -517,6 +550,7 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
                 "negative_prompt": v.get("negative_prompt", ""),
                 "error": result.get("error", ""),
                 "critique": critique,
+                "result_critique": result_critique,
             })
         except Exception as e:
             candidates.append({"index": i, "label": v.get("style", ""), "ok": False, "error": str(e), "critique": None})
@@ -778,6 +812,15 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
                 for ref in refs[:3]
             ]
 
+    # P0: ElevenLabs requires pre-selected voice_id
+    if provider_name == "elevenlabs":
+        hints = profile.get("provider_hints", {})
+        if not hints.get("elevenlabs_voice_id") and not body.get("allow_auto_design"):
+            raise HTTPException(
+                status_code=400,
+                detail="请先通过'生成专属音色'或'三候选对比'生成候选并选定一个音色。",
+            )
+
     text = body.get("text") or profile.get("sample_text", "你好。")
 
     try:
@@ -785,6 +828,12 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
         draft = await oc_session.get_session_draft(session_id)
         performance = await analyze_performance(text, draft)
         profile["last_performance"] = performance
+        # Apply performance cues to provider hints for TTS
+        units = performance.get("units", [])
+        if units:
+            profile.setdefault("provider_hints", {})
+            profile["provider_hints"]["performance_units"] = units
+            profile["provider_hints"]["overall_tone"] = performance.get("overall_tone", "")
     except Exception:
         pass
 
@@ -810,7 +859,34 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
                 "audio_url": audio_url,
             },
         )
-        return {"ok": True, "audio_path": result_path, "audio_url": audio_url, "provider": provider_name, "asset_id": asset_id}
+
+        # Per-unit TTS: generate audio for each performance unit
+        per_unit_results = []
+        units = profile.get("provider_hints", {}).get("performance_units", [])
+        if units and hasattr(provider, "synthesize_performance_units"):
+            try:
+                per_unit_results = await provider.synthesize_performance_units(
+                    profile, output_path
+                )
+                for pu in per_unit_results:
+                    if pu.get("audio_path") and not pu.get("error"):
+                        pu_url = "/exports/voices/" + Path(pu["audio_path"]).name
+                        db.insert_asset(
+                            session_id, "voice_sample", provider_name, pu["audio_path"],
+                            {"unit_index": pu["unit_index"], "clean_text": pu.get("clean_text", ""),
+                             "audio_url": pu_url, "parent_asset_id": asset_id}
+                        )
+            except Exception:
+                pass
+
+        return {
+            "ok": True,
+            "audio_path": result_path,
+            "audio_url": audio_url,
+            "provider": provider_name,
+            "asset_id": asset_id,
+            "per_unit_results": per_unit_results if per_unit_results else None,
+        }
     except Exception as e:
         db.insert_voice_generation(session_id, provider_name, text, json.dumps(profile, ensure_ascii=False), status="failed", error_message=str(e))
         return {"ok": False, "error": str(e)}
@@ -1079,6 +1155,8 @@ async def list_voice_references(session_id: str, user: dict[str, Any] = Depends(
     return {"ok": True, "references": db.get_voice_references(session_id)}
 
 
+# DEPRECATED: /voice-cast uses Fish Audio public model search. Main voice flow is now ElevenLabs.
+# This endpoint is kept for advanced/debug purposes only. Frontend main flow does NOT call this.
 @app.post("/api/sessions/{session_id}/voice-cast")
 async def voice_cast(session_id: str, body: dict | None = None, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_voice_casting import cast_voice
