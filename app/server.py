@@ -492,6 +492,12 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
     from .oc_image_prompt_director import direct_image_prompt
     from .oc_image_critic import critique_image_prompt, critique_image_result
     from pathlib import Path
+
+    STYLE_LABEL_MAP = {
+        "anime character key visual": "动漫精绘",
+        "anime portrait cinematic rim light": "电影感动漫",
+        "game character concept art": "游戏立绘",
+    }
     _require_session_access(session_id, user)
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
@@ -540,7 +546,7 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
                 asset_id = db.insert_asset(session_id, "image_candidate", "stability", result["image_path"],
                     {"index": i, "style": v.get("style", ""), "prompt": v.get("positive_prompt", "")})
             candidates.append({
-                "index": i, "label": v.get("style", "游戏立绘").replace("anime character key visual", "动漫精绘").replace("anime portrait cinematic rim light", "电影感").replace("game character concept art", "游戏立绘"),
+                "index": i, "label": STYLE_LABEL_MAP.get(v.get("style", ""), f"候选 {i + 1}"),
                 "style": v.get("style", ""),
                 "ok": result.get("ok", False),
                 "image_path": result.get("image_path", ""),
@@ -751,6 +757,18 @@ async def voice_analyze(session_id: str, user: dict[str, Any] = Depends(auth.cur
             if field in existing:
                 profile[field] = existing[field]
     profile.update(existing.get("user_overrides", {}) if existing else {})
+
+    # Regenerate OC-specific sample lines via Line Writer
+    try:
+        from .oc_line_writer import write_lines
+        line_result = await write_lines(draft, count=5)
+        lines = line_result.get("lines", [])
+        if lines:
+            profile["sample_lines"] = lines
+            profile["sample_text"] = lines[0].get("text", profile.get("sample_text", ""))
+    except Exception:
+        pass
+
     db.save_voice_profile(session_id, json.dumps(profile, ensure_ascii=False))
     return {"ok": True, "voice_profile": profile, "audit": audit}
 
@@ -821,12 +839,37 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
                 detail="请先通过'生成专属音色'或'三候选对比'生成候选并选定一个音色。",
             )
 
-    text = body.get("text") or profile.get("sample_text", "你好。")
+    text = body.get("text") or profile.get("sample_text", "")
+
+    # Auto-generate character-specific dialogue lines when no text is provided
+    if not text:
+        try:
+            from .oc_line_writer import write_lines
+            draft = await oc_session.get_session_draft(session_id)
+            if draft:
+                line_result = await write_lines(draft, count=5)
+                lines = line_result.get("lines", [])
+                if lines:
+                    text = lines[0].get("text", "")
+                    profile["sample_lines"] = lines
+                    profile["sample_text"] = text
+        except Exception:
+            pass
+
+    if not text:
+        text = "你好。"
 
     try:
         from .oc_dialogue_performance import analyze_performance
         draft = await oc_session.get_session_draft(session_id)
-        performance = await analyze_performance(text, draft)
+
+        # Use multi-line text for richer per-unit analysis when sample_lines exist
+        sample_lines = profile.get("sample_lines", [])
+        analysis_text = text
+        if sample_lines:
+            analysis_text = "\n".join([l.get("text", "") for l in sample_lines if l.get("text")])
+
+        performance = await analyze_performance(analysis_text, draft)
         profile["last_performance"] = performance
         # Apply performance cues to provider hints for TTS
         units = performance.get("units", [])
@@ -868,9 +911,14 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
                 per_unit_results = await provider.synthesize_performance_units(
                     profile, output_path
                 )
-                for pu in per_unit_results:
+                for idx, pu in enumerate(per_unit_results):
                     if pu.get("audio_path") and not pu.get("error"):
                         pu_url = "/exports/voices/" + Path(pu["audio_path"]).name
+                        # Attach line metadata (emotion, context) from sample_lines
+                        if idx < len(sample_lines):
+                            pu["context"] = sample_lines[idx].get("context", "")
+                            pu["emotion"] = sample_lines[idx].get("emotion", "")
+                            pu["to_whom"] = sample_lines[idx].get("to_whom", "")
                         db.insert_asset(
                             session_id, "voice_sample", provider_name, pu["audio_path"],
                             {"unit_index": pu["unit_index"], "clean_text": pu.get("clean_text", ""),
@@ -886,6 +934,8 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
             "provider": provider_name,
             "asset_id": asset_id,
             "per_unit_results": per_unit_results if per_unit_results else None,
+            "sample_lines": sample_lines if sample_lines else None,
+            "overall_tone": profile.get("provider_hints", {}).get("overall_tone", ""),
         }
     except Exception as e:
         db.insert_voice_generation(session_id, provider_name, text, json.dumps(profile, ensure_ascii=False), status="failed", error_message=str(e))
@@ -1106,6 +1156,91 @@ async def select_voice_sample_candidate(session_id: str, body: dict, user: dict[
         "voice_profile": profile,
         "asset_id": voice_identity_asset_id,
         "selected_preview_asset_id": selected_preview_asset_id,
+    }
+
+
+@app.post("/api/sessions/{session_id}/dialogue-rehearsal")
+async def dialogue_rehearsal(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    """Run a full dialogue turn: Director → Line Writer → Performance → TTS.
+
+    Takes a user line and optional scene context, returns the full beat analysis,
+    the OC's response line, and optionally generated audio.
+    """
+    _require_session_access(session_id, user)
+    draft = await oc_session.get_session_draft(session_id)
+    if draft is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    user_line = body.get("user_line", "").strip()
+    if not user_line:
+        raise HTTPException(status_code=400, detail="user_line is required")
+
+    scene_context = body.get("scene_context", "") or draft.scenario or ""
+    relationship_context = body.get("relationship_context", "")
+    generate_audio = body.get("generate_audio", False)
+
+    from .oc_dialogue_director import direct_beat
+    from .oc_line_writer import write_lines
+    from .oc_dialogue_performance import analyze_performance
+
+    # 1. Director: analyze the beat
+    beat = await direct_beat(
+        draft, user_line,
+        scene_context=scene_context,
+        relationship_context=relationship_context,
+        history_context=body.get("history_context", ""),
+    )
+
+    # 2. Line Writer: generate OC response text (one line)
+    line_result = await write_lines(draft, count=1)
+    lines = line_result.get("lines", [])
+    response_text = lines[0].get("text", "") if lines else ""
+    response_emotion = lines[0].get("emotion", "") if lines else ""
+
+    # 3. Performance Director: analyze delivery
+    performance = {}
+    if response_text:
+        try:
+            performance = await analyze_performance(response_text, draft)
+        except Exception:
+            pass
+
+    # 4. TTS: generate audio if requested and ElevenLabs voice exists
+    audio_url = None
+    if generate_audio and response_text:
+        try:
+            from .config import get_config, get_project_root
+            from .voice_providers.base import get_provider
+            cfg = get_config()
+            vc = cfg.get("voice", {})
+            provider_name = vc.get("provider", "elevenlabs")
+            profile = db.get_voice_profile(session_id)
+            if profile:
+                hints = profile.get("provider_hints", {})
+                if hints.get("elevenlabs_voice_id"):
+                    provider = get_provider(provider_name)
+                    output_dir = get_project_root() / "exports" / "voices"
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    from pathlib import Path
+                    out_path = str(output_dir / f"{session_id}_rehearsal.mp3")
+                    audio_path = await provider.synthesize(response_text, profile, out_path)
+                    audio_url = "/exports/voices/" + Path(audio_path).name
+                    profile["last_performance"] = performance
+                    if performance.get("units"):
+                        profile.setdefault("provider_hints", {})
+                        profile["provider_hints"]["performance_units"] = performance["units"]
+                    db.save_voice_profile(session_id, json.dumps(profile, ensure_ascii=False))
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "user_line": user_line,
+        "beat": beat,
+        "response_text": response_text,
+        "response_emotion": response_emotion,
+        "performance": performance,
+        "audio_url": audio_url,
     }
 
 

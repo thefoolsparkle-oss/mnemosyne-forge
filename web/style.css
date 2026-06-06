@@ -1051,6 +1051,25 @@ html, body {
 .voice-sample-player { margin-top: 8px; }
 .voice-sample-player audio { width: 100%; }
 
+/* Per-unit voice results */
+.voice-per-unit { margin-top: 8px; }
+.voice-unit-item { margin-top: 6px; padding: 6px 10px; background: var(--bg-warm); border-radius: var(--radius-sm); }
+.voice-unit-text { font-size: 13px; color: var(--text-primary); margin-bottom: 4px; }
+.voice-unit-badges { margin-left: 6px; }
+.voice-unit-badge { display: inline-block; font-size: 11px; padding: 1px 6px; margin-right: 4px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); }
+.voice-unit-item audio { width: 100%; }
+
+/* Sample lines display */
+.voice-sample-lines { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border-light); }
+.voice-line-item { padding: 4px 0; font-size: 13px; color: var(--text-primary); display: flex; align-items: baseline; gap: 6px; }
+.voice-line-index { color: var(--text-muted); min-width: 20px; }
+.voice-line-text { flex: 1; }
+.voice-line-badges { white-space: nowrap; }
+
+/* Rehearsal overlay */
+#rehearsal-overlay { justify-content: center; align-items: center; }
+#rehearsal-overlay .voice-panel { max-width: 480px; max-height: 85vh; overflow-y: auto; }
+
 .voice-warnings { margin-top: 10px; padding: 8px 12px; background: rgba(196,112,74,0.08); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-secondary); }
 
 .voice-provider-section {

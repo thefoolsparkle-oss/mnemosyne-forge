@@ -982,6 +982,31 @@
           player.innerHTML = '<audio controls src="' + escapeAttr(data.audio_url || data.audio_path) + '"></audio>';
           wireExclusiveAudio(player);
         }
+        // Render per-unit TTS results when available
+        var perUnit = data.per_unit_results;
+        if (perUnit && perUnit.length > 0) {
+          var puContainer = voiceContent.querySelector('.voice-per-unit') || document.createElement('div');
+          puContainer.className = 'voice-per-unit';
+          var puHtml = '<div class="voice-summary" style="margin-top:8px">逐句试听</div>';
+          perUnit.forEach(function(pu) {
+            if (pu.error) { puHtml += '<div class="voice-loading" style="color:var(--error)">第' + (pu.unit_index + 1) + '句失败: ' + escapeHtml(pu.error) + '</div>'; }
+            else if (pu.audio_path) {
+              var puAudioUrl = '/exports/voices/' + pu.audio_path.replace(/\\/g, '/').split('/').pop();
+              var puText = pu.clean_text ? escapeHtml(pu.clean_text) : '';
+              var badges = [];
+              if (pu.emotion) badges.push(pu.emotion);
+              if (pu.context) badges.push(pu.context);
+              var badgeHtml = badges.length > 0 ? ' <span class="voice-unit-badges">' + badges.map(function(b){return '<span class="voice-unit-badge">'+escapeHtml(b)+'</span>';}).join('') + '</span>' : '';
+              puHtml += '<div class="voice-unit-item"><div class="voice-unit-text">' + escapeHtml('#' + (pu.unit_index + 1)) + ' ' + puText + badgeHtml + '</div><audio controls src="' + escapeAttr(puAudioUrl) + '"></audio></div>';
+            }
+          });
+          puContainer.innerHTML = puHtml;
+          wireExclusiveAudio(puContainer);
+          var existing = voiceContent.querySelector('.voice-per-unit');
+          if (!existing && player && player.parentNode) {
+            player.parentNode.appendChild(puContainer);
+          }
+        }
         showToast('试听已生成', 'success');
       } else {
         showToast(data.error || '生成失败', 'error');
@@ -1066,6 +1091,65 @@
     } catch(e) { showToast(e.message, 'error'); }
   });
 
+  // Dialogue Rehearsal
+  $('#btn-voice-rehearsal').addEventListener('click', function() {
+    if (!state.sessionId) return;
+    var rhOverlay = document.getElementById('rehearsal-overlay');
+    var rhContent = document.getElementById('rehearsal-content');
+    rhOverlay.classList.remove('hidden');
+    rhContent.innerHTML = '<div class="voice-loading">准备排练…</div>';
+    var sceneCtx = (state.draft && state.draft.scenario) ? state.draft.scenario : '';
+    rhContent.innerHTML = (
+      '<div class="voice-sample-text" style="margin-bottom:8px">场景: ' + escapeHtml(sceneCtx || '未设定') + '</div>' +
+      '<textarea id="rh-user-line" class="voice-edit-input" rows="2" placeholder="输入一句你对角色说的话…" style="width:100%;margin-bottom:8px"></textarea>' +
+      '<button id="btn-rh-go" class="btn-search-go">发送</button>' +
+      '<div id="rh-result"></div>'
+    );
+    document.getElementById('btn-rh-go').addEventListener('click', async function() {
+      var userLine = document.getElementById('rh-user-line').value.trim();
+      if (!userLine) { showToast('请输入一句话', 'error'); return; }
+      var resultEl = document.getElementById('rh-result');
+      resultEl.innerHTML = '<div class="voice-loading">角色正在思考…</div>';
+      try {
+        var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/dialogue-rehearsal', {
+          user_line: userLine,
+          scene_context: sceneCtx,
+          generate_audio: true,
+        });
+        var beat = data.beat || {};
+        var html = '';
+        if (data.response_text) {
+          html += '<div class="voice-summary" style="margin-top:10px">角色回应</div>';
+          html += '<div class="voice-sample-text" style="font-size:15px;padding:8px 12px;margin:6px 0">' + escapeHtml(data.response_text) + '</div>';
+          if (data.audio_url) {
+            html += '<audio controls src="' + escapeAttr(data.audio_url) + '" style="width:100%;margin-top:4px"></audio>';
+          }
+        }
+        html += '<div class="voice-summary">拍点分析</div>';
+        html += '<div class="voice-grid">';
+        var beatFields = [
+          ['场景状态', beat.scene_state], ['用户意图', beat.user_intent],
+          ['角色内心', beat.character_inner_reaction], ['关系变化', beat.relationship_delta],
+          ['本轮目的', beat.beat_goal], ['回应方式', beat.response_mode],
+        ];
+        beatFields.forEach(function(f) { html += '<div class="voice-item"><div class="voice-item-label">' + escapeHtml(f[0]) + '</div><div class="voice-item-value">' + escapeHtml(f[1] || '—') + '</div></div>'; });
+        var vd = beat.voice_direction || {};
+        html += '<div class="voice-item"><div class="voice-item-label">情绪</div><div class="voice-item-value">' + escapeHtml(vd.emotion || '—') + '</div></div>';
+        html += '<div class="voice-item"><div class="voice-item-label">音量</div><div class="voice-item-value">' + escapeHtml(vd.volume || '—') + '</div></div>';
+        html += '<div class="voice-item"><div class="voice-item-label">语速</div><div class="voice-item-value">' + escapeHtml(vd.speed || '—') + '</div></div>';
+        html += '<div class="voice-item"><div class="voice-item-label">停顿</div><div class="voice-item-value">' + escapeHtml(vd.pause || '—') + '</div></div>';
+        html += '</div>';
+        resultEl.innerHTML = html;
+      } catch(e) { resultEl.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>'; }
+    });
+  });
+  $('#btn-rehearsal-close').addEventListener('click', function() {
+    document.getElementById('rehearsal-overlay').classList.add('hidden');
+  });
+  document.getElementById('rehearsal-overlay').addEventListener('click', function(e) {
+    if (e.target === this) this.classList.add('hidden');
+  });
+
   async function loadVoiceOptions() {
     try {
       voiceOptions = await apiCall('GET', '/api/voice-options');
@@ -1095,6 +1179,16 @@
     if (vp.reason) html += '<div class="voice-reason">' + escapeHtml(vp.reason) + '</div>';
     if (vp.reference_strategy) html += '<div class="voice-fish-note">' + escapeHtml(vp.reference_strategy) + '</div>';
     html += grid;
+    if (vp.sample_lines && vp.sample_lines.length > 0) {
+      html += '<div class="voice-sample-lines"><div class="voice-summary">角色台词 <button id="btn-regen-lines" class="btn-search-go" style="margin-left:8px;padding:2px 10px;font-size:12px">重新生成</button></div>';
+      vp.sample_lines.forEach(function(line, idx) {
+        var badges = [];
+        if (line.emotion) badges.push('<span class="voice-unit-badge">' + escapeHtml(line.emotion) + '</span>');
+        if (line.context) badges.push('<span class="voice-unit-badge">' + escapeHtml(line.context) + '</span>');
+        html += '<div class="voice-line-item"><span class="voice-line-index">' + (idx+1) + '.</span> <span class="voice-line-text">' + escapeHtml(line.text || '') + '</span><span class="voice-line-badges">' + badges.join(' ') + '</span></div>';
+      });
+      html += '</div>';
+    }
     if (vp.sample_text) html += '<div class="voice-sample"><div class="voice-sample-text">"' + escapeHtml(vp.sample_text) + '"</div><div class="voice-sample-player"></div></div>';
     if (vp.warnings && vp.warnings.length > 0) html += '<div class="voice-warnings">' + escapeHtml(vp.warnings.join('; ')) + '</div>';
     var hints = vp.provider_hints || {};
@@ -1119,6 +1213,17 @@
     if (directive.avoid && directive.avoid.length) html += '<div class="voice-warnings">避免: ' + escapeHtml(directive.avoid.join('、')) + '</div>';
     html += '<div class="voice-edit-section"><input type="text" id="voice-edit-ref" class="voice-edit-input" placeholder="Fish reference_id，例如 8ef4..." value="' + escapeAttr(hints.fish_reference_id || '') + '"><button id="btn-voice-save" class="btn-search-go">保存设置</button></div>';
     voiceContent.innerHTML = html;
+    // Wire regenerate lines button (after innerHTML set)
+    var btnRegen = document.getElementById('btn-regen-lines');
+    if (btnRegen) btnRegen.addEventListener('click', async function() {
+      if (!state.sessionId) return;
+      btnRegen.textContent = '生成中…'; btnRegen.disabled = true;
+      try {
+        var regenData = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-profile/analyze');
+        if (regenData.voice_profile) renderVoiceProfile(regenData.voice_profile);
+        showToast('台词已重新生成', 'success');
+      } catch(e) { showToast(e.message, 'error'); btnRegen.textContent = '重新生成'; btnRegen.disabled = false; }
+    });
     var librarySelect = document.getElementById('voice-fish-library');
     if (librarySelect) librarySelect.addEventListener('change', function() { var refInput = document.getElementById('voice-edit-ref'); if (refInput) refInput.value = this.value; });
     var btnSave = document.getElementById('btn-voice-save');

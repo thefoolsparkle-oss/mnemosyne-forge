@@ -259,6 +259,7 @@
         <button id="btn-voice-cast" class="btn-draft-action">生成专属音色</button>
         <button id="btn-voice-candidates" class="btn-draft-action">三候选对比</button>
         <button id="btn-voice-generate" class="btn-draft-action">生成试听</button>
+        <button id="btn-voice-rehearsal" class="btn-draft-action">对话排练</button>
       </div>
       <button id="btn-voice-advanced-toggle" class="btn-draft-action" style="width:100%;margin-top:6px">▸ 高级：Fish Audio / 参考音频</button>
       <div id="voice-advanced" class="voice-advanced hidden">
@@ -268,9 +269,16 @@
           <button id="btn-voice-ref-upload" class="btn-draft-action">绑定参考音频</button>
         </div>
       </div>
-        <div id="voice-content" class="voice-content">
-          <div class="voice-loading">点击“分析声线”开始</div>
+      <div id="voice-content" class="voice-content">
+        <div class="voice-loading">点击"分析声线"开始</div>
+      </div>
+      <!-- Rehearsal overlay -->
+      <div id="rehearsal-overlay" class="voice-overlay hidden" style="z-index:2000">
+        <div class="voice-panel">
+          <div class="voice-panel-header"><h3>对话排练</h3><button id="btn-rehearsal-close" class="btn-close-card">&times;</button></div>
+          <div id="rehearsal-content"></div>
         </div>
+      </div>
       </div>
     </div>
   </div>
