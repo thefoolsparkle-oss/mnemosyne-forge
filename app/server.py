@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import auth, db, oc_session
 from .config import get_app_config, get_project_root
+from .voice_safety import should_block_elevenlabs_auto_design
 
 app = FastAPI(title="Mnemosyne Forge", version="0.1.0")
 MAX_VOICE_REFERENCE_BYTES = 50 * 1024 * 1024
@@ -830,14 +831,11 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
                 for ref in refs[:3]
             ]
 
-    # P0: ElevenLabs requires pre-selected voice_id
-    if provider_name == "elevenlabs":
-        hints = profile.get("provider_hints", {})
-        if not hints.get("elevenlabs_voice_id") and not body.get("allow_auto_design"):
-            raise HTTPException(
-                status_code=400,
-                detail="请先通过'生成专属音色'或'三候选对比'生成候选并选定一个音色。",
-            )
+    if should_block_elevenlabs_auto_design(provider_name, profile, body):
+        raise HTTPException(
+            status_code=400,
+            detail="请先生成并选择一个 ElevenLabs 专属音色，再生成试听。",
+        )
 
     text = body.get("text") or profile.get("sample_text", "")
 

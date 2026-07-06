@@ -1,4 +1,4 @@
-# Mnemosyne Forge — Unified Check Command
+# Mnemosyne Forge - Unified Check Command
 # Usage: py -m scripts.check
 # Or:    python scripts/check.py
 
@@ -26,6 +26,7 @@ def main():
     ok &= run("node --check web/app.js", "JS Syntax")
     ok &= run(f"{sys.executable} -m compileall app scripts", "Python Compile")
     ok &= run(f"{sys.executable} scripts/test_selected_assets_export.py", "Smoke Test")
+    ok &= run(f"{sys.executable} scripts/test_voice_safety_and_performance.py", "Voice Safety")
     ok &= run(f"{sys.executable} scripts/index_legacy_exports.py", "Legacy Index")
     print(f"\n=== {'ALL OK' if ok else 'SOME FAILED'} ===")
     sys.exit(0 if ok else 1)
