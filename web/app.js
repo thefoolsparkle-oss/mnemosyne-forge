@@ -923,6 +923,7 @@
         { name: 'pollinations', label: 'Pollinations（免费默认）', requires_api_key: false },
         { name: 'stability', label: 'Stability AI', requires_api_key: true },
         { name: 'openai', label: 'OpenAI DALL-E', requires_api_key: true },
+        { name: 'seedream', label: 'Seedream (火山方舟)', requires_api_key: true },
         { name: 'custom', label: '其他（自定义）', requires_api_key: true },
       ];
     }

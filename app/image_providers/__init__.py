@@ -8,12 +8,14 @@ from .base import ImageProvider
 from .custom_provider import CustomProvider
 from .openai_provider import OpenAIProvider
 from .pollinations_provider import PollinationsProvider
+from .seedream_provider import SeedreamProvider
 from .stability_provider import StabilityProvider
 
 
 _PROVIDERS: dict[str, type[ImageProvider]] = {
     "stability": StabilityProvider,
     "openai": OpenAIProvider,
+    "seedream": SeedreamProvider,
     "pollinations": PollinationsProvider,
     "custom": CustomProvider,
 }
@@ -37,6 +39,7 @@ def list_providers() -> list[dict[str, Any]]:
             "label": {
                 "stability": "Stability AI",
                 "openai": "OpenAI DALL-E",
+                "seedream": "Seedream (火山方舟)",
                 "pollinations": "Pollinations（免费默认）",
                 "custom": "其他（自定义）",
             }.get(key, key),

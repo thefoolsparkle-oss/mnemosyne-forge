@@ -19,6 +19,7 @@ from app.image_providers import get_provider, list_providers
 from app.image_providers.custom_provider import CustomProvider
 from app.image_providers.openai_provider import OpenAIProvider
 from app.image_providers.pollinations_provider import PollinationsProvider
+from app.image_providers.seedream_provider import SeedreamProvider
 from app.image_providers.stability_provider import StabilityProvider
 from app.oc_models import OCDraft
 
@@ -31,6 +32,7 @@ app_config._config_cache = {
             "pollinations": {"width": 1024, "height": 1024},
             "stability": {"api_key_env": "STABILITY_API_KEY", "model": "sd3.5-large", "aspect_ratio": "1:1"},
             "openai": {"api_key_env": "OPENAI_API_KEY", "model": "dall-e-3", "size": "1024x1024", "quality": "standard"},
+            "seedream": {"api_key_env": "SEEDREAM_API_KEY", "base_url": "https://ark.cn-beijing.volces.com/api/v3", "model": "seedream-3-0-t2i-250722", "size": "1024x1024"},
         },
     },
 }
@@ -54,7 +56,7 @@ def _draft() -> OCDraft:
 def test_list_providers() -> None:
     providers = list_providers()
     names = {p["name"] for p in providers}
-    assert names == {"stability", "openai", "pollinations", "custom"}
+    assert names == {"stability", "openai", "seedream", "pollinations", "custom"}
     pollinations = next(p for p in providers if p["name"] == "pollinations")
     assert pollinations["requires_api_key"] is False
 
@@ -62,6 +64,7 @@ def test_list_providers() -> None:
 def test_get_provider() -> None:
     assert isinstance(get_provider("stability"), StabilityProvider)
     assert isinstance(get_provider("openai"), OpenAIProvider)
+    assert isinstance(get_provider("seedream"), SeedreamProvider)
     assert isinstance(get_provider("pollinations"), PollinationsProvider)
     assert isinstance(get_provider("custom"), CustomProvider)
 
@@ -128,6 +131,35 @@ async def test_custom_provider_requires_fields() -> None:
     result = await provider.generate(_draft(), "anime portrait", "prompt", "negative")
     assert result["ok"] is False
     assert "base_url" in result["error"]
+
+
+@pytest.mark.anyio
+async def test_seedream_provider_missing_key(monkeypatch) -> None:
+    monkeypatch.delenv("SEEDREAM_API_KEY", raising=False)
+    app_config._config_cache["image"]["providers"]["seedream"]["api_key_env"] = "MISSING_SEEDREAM_KEY"
+    try:
+        provider = SeedreamProvider()
+        result = await provider.generate(_draft(), "anime portrait", "prompt", "negative")
+        assert result["ok"] is False
+        assert "API Key" in result["error"] or "未配置" in result["error"]
+    finally:
+        app_config._config_cache["image"]["providers"]["seedream"]["api_key_env"] = "SEEDREAM_API_KEY"
+
+
+@pytest.mark.anyio
+async def test_seedream_provider_success(monkeypatch) -> None:
+    async def fake_post(*args, **kwargs):
+        image_b64 = base64.b64encode(b"fake_image").decode()
+        return _FakeResponse(200, {"created": 321, "data": [{"b64_json": image_b64}]})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", fake_post)
+
+    provider = SeedreamProvider()
+    monkeypatch.setenv("SEEDREAM_API_KEY", "fake_seedream_key")
+    result = await provider.generate(_draft(), "anime portrait", "prompt", "negative")
+    assert result["ok"] is True
+    assert result["seed"] == 321
+    assert result["image_path"].endswith(".png")
 
 
 @pytest.mark.anyio
