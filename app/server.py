@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import auth, db, oc_session
-from .config import get_app_config, get_project_root
+from .config import get_app_config, get_config, get_project_root
 from .voice_safety import should_block_elevenlabs_auto_design
 
 app = FastAPI(title="Mnemosyne Forge", version="0.1.0")
@@ -70,6 +70,39 @@ if _exports_dir.exists():
 @app.get("/health")
 async def health():
     return {"ok": True, "service": "Mnemosyne Forge"}
+
+
+@app.get("/api/features")
+async def features(user: dict[str, Any] = Depends(auth.current_user)):
+    """Return active feature flags derived from config.
+
+    Voice availability is driven by voice.provider rather than the legacy
+    features.voice_enabled flag.
+    """
+    cfg = get_config()
+    features_cfg = cfg.get("features", {})
+    voice_provider = cfg.get("voice", {}).get("provider", "none")
+    return {
+        "ok": True,
+        "search_enabled": bool(features_cfg.get("search_enabled", False)),
+        "world_enabled": bool(features_cfg.get("world_enabled", False)),
+        "image_enabled": bool(features_cfg.get("image_enabled", False)),
+        "voice_enabled": voice_provider not in ("", "none"),
+        "voice_provider": voice_provider,
+    }
+
+
+@app.post("/api/admin/cleanup-exports")
+async def admin_cleanup_exports(body: dict | None = None, user: dict[str, Any] = Depends(auth.current_admin)):
+    """Remove export files that are no longer referenced by any asset record.
+
+    Pass {"dry_run": true} to preview files without deleting.
+    """
+    from scripts.cleanup_orphan_exports import cleanup
+
+    dry_run = bool((body or {}).get("dry_run", False))
+    result = cleanup(dry_run=dry_run)
+    return {"ok": True, "dry_run": dry_run, **result}
 
 
 @app.post("/shutdown")
@@ -804,6 +837,9 @@ async def voice_sample(session_id: str, body: dict, user: dict[str, Any] = Depen
     vc = cfg.get("voice", {})
     provider_name = body.get("provider") or vc.get("provider", "none")
 
+    if provider_name in ("", "none"):
+        raise HTTPException(status_code=400, detail="声音功能未启用，请在 config.yaml 中设置 voice.provider。")
+
     profile = db.get_voice_profile(session_id)
     if not profile:
         raise HTTPException(status_code=404, detail="Voice profile not found. Analyze first.")
@@ -1155,6 +1191,120 @@ async def select_voice_sample_candidate(session_id: str, body: dict, user: dict[
         "asset_id": voice_identity_asset_id,
         "selected_preview_asset_id": selected_preview_asset_id,
     }
+
+
+@app.post("/api/sessions/{session_id}/voice-unit-regenerate")
+async def voice_unit_regenerate(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    """Regenerate audio for a single performance unit.
+
+    Accepts unit_index and optional parameter overrides. The unit is re-synthesized
+    with the saved ElevenLabs voice_id, and the resulting audio path is returned.
+    """
+    from .config import get_project_root
+    from .voice_providers.elevenlabs_provider import ElevenLabsProvider
+
+    _require_session_access(session_id, user)
+    cfg = get_config()
+    vc = cfg.get("voice", {})
+    provider_name = vc.get("provider", "none")
+    if provider_name not in ("elevenlabs",):
+        raise HTTPException(status_code=400, detail="单句重生成当前仅支持 ElevenLabs provider。")
+
+    profile = db.get_voice_profile(session_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found. Analyze first.")
+
+    hints = profile.setdefault("provider_hints", {})
+    voice_id = hints.get("elevenlabs_voice_id")
+    if not voice_id:
+        raise HTTPException(status_code=400, detail="请先生成并选择专属音色，再对单句进行重生成。")
+
+    units = hints.get("performance_units", [])
+    unit_index = int(body.get("unit_index", 0))
+    if unit_index < 0 or unit_index >= len(units):
+        raise HTTPException(status_code=400, detail="unit_index out of range.")
+
+    unit = dict(units[unit_index])
+    # Apply user overrides
+    for key in ("emotion", "speed", "volume", "distance", "pause_before_ms", "pause_after_ms"):
+        if key in body and body[key] is not None:
+            unit[key] = body[key]
+
+    clean_text = str(unit.get("clean_text", "")).strip()
+    if not clean_text:
+        raise HTTPException(status_code=400, detail="该表演单元没有可用于合成的文本。")
+
+    output_dir = get_project_root() / vc.get("output_dir", "exports/voices")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = str(output_dir / f"{session_id}_unit{unit_index}_regen.mp3")
+
+    provider = ElevenLabsProvider()
+    try:
+        audio_path = await provider.text_to_speech(
+            clean_text, voice_id, profile, output_path,
+            unit_index=unit_index,
+            previous_text=units[unit_index - 1].get("clean_text", "") if unit_index > 0 else "",
+            next_text=units[unit_index + 1].get("clean_text", "") if unit_index + 1 < len(units) else "",
+        )
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+    audio_url = "/exports/voices/" + Path(audio_path).name
+    asset_id = db.insert_asset(
+        session_id,
+        "voice_sample",
+        provider_name,
+        audio_path,
+        {
+            "unit_index": unit_index,
+            "clean_text": clean_text,
+            "audio_url": audio_url,
+            "regenerated": True,
+            "unit": unit,
+        },
+    )
+
+    return {
+        "ok": True,
+        "unit_index": unit_index,
+        "clean_text": clean_text,
+        "audio_path": audio_path,
+        "audio_url": audio_url,
+        "unit": unit,
+        "asset_id": asset_id,
+    }
+
+
+@app.post("/api/sessions/{session_id}/voice-unit-favorite")
+async def voice_unit_favorite(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
+    """Save the parameters of a preferred unit back to the voice profile.
+
+    These per-unit favorites can later be used to refine the overall voice profile
+    or to seed future performance analysis.
+    """
+    _require_session_access(session_id, user)
+    profile = db.get_voice_profile(session_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found. Analyze first.")
+
+    unit_index = int(body.get("unit_index", 0))
+    units = profile.get("provider_hints", {}).get("performance_units", [])
+    if unit_index < 0 or unit_index >= len(units):
+        raise HTTPException(status_code=400, detail="unit_index out of range.")
+
+    unit = dict(units[unit_index])
+    for key in ("emotion", "speed", "volume", "distance", "pause_before_ms", "pause_after_ms"):
+        if key in body and body[key] is not None:
+            unit[key] = body[key]
+
+    favorites = profile.setdefault("unit_favorites", [])
+    # Replace any existing favorite for this unit_index
+    favorites = [f for f in favorites if f.get("unit_index") != unit_index]
+    favorites.append({"unit_index": unit_index, "unit": unit, "note": body.get("note", "")})
+    profile["unit_favorites"] = favorites
+
+    db.save_voice_profile(session_id, json.dumps(profile, ensure_ascii=False))
+    return {"ok": True, "unit_index": unit_index, "favorites_count": len(favorites)}
 
 
 @app.post("/api/sessions/{session_id}/dialogue-rehearsal")

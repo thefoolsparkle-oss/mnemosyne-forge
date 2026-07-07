@@ -151,6 +151,40 @@
     return escapeHtml(value);
   }
 
+  // Generic DOM builder helper. Reduces raw innerHTML surface and centralizes
+  // attribute escaping. `attrs` may include `className`, `textContent`, `innerHTML`,
+  // event handlers (`on_*`) and arbitrary HTML attributes.
+  function createEl(tag, attrs) {
+    attrs = attrs || {};
+    var el = document.createElement(tag);
+    for (var key in attrs) {
+      if (!Object.prototype.hasOwnProperty.call(attrs, key)) continue;
+      var val = attrs[key];
+      if (key === 'className') {
+        el.className = val;
+      } else if (key === 'textContent') {
+        el.textContent = val;
+      } else if (key === 'innerHTML') {
+        el.innerHTML = val;
+      } else if (key.indexOf('on_') === 0 && typeof val === 'function') {
+        el.addEventListener(key.slice(3), val);
+      } else if (key === 'dataset') {
+        for (var dkey in val) {
+          if (Object.prototype.hasOwnProperty.call(val, dkey)) {
+            el.dataset[dkey] = val[dkey];
+          }
+        }
+      } else if (key === 'children' && Array.isArray(val)) {
+        val.forEach(function(child) {
+          if (child) el.appendChild(child);
+        });
+      } else if (val != null) {
+        el.setAttribute(key, String(val));
+      }
+    }
+    return el;
+  }
+
   function addMessage(role, content, timestamp) {
     const div = document.createElement('div');
     div.className = 'msg ' + role;
@@ -401,38 +435,61 @@
     if (selectedAssets) {
       var assetSection = document.getElementById('card-assets-section');
       if (!assetSection) {
-        assetSection = document.createElement('div');
-        assetSection.id = 'card-assets-section';
-        assetSection.className = 'card-section';
-        assetSection.innerHTML = '<h4>绑定资产</h4><div id="card-assets"></div>';
+        assetSection = createEl('div', { id: 'card-assets-section', className: 'card-section' });
+        assetSection.appendChild(createEl('h4', { textContent: '绑定资产' }));
+        assetSection.appendChild(createEl('div', { id: 'card-assets' }));
         var cardBody = document.querySelector('.card-body');
         if (cardBody) cardBody.appendChild(assetSection);
       }
       var assetsEl = document.getElementById('card-assets');
-      var assetHtml = '';
+      assetsEl.innerHTML = '';
+
       if (selectedAssets.image) {
         var img = selectedAssets.image;
         var imgName = (img.path || '').split(/[/\\]/).pop();
-        var meta = img.metadata_json ? (typeof img.metadata_json === 'string' ? JSON.parse(img.metadata_json) : img.metadata_json) : (img.metadata || {});
-        assetHtml += '<div class="card-asset-item"><strong>立绘</strong><br>';
-        if (imgName) assetHtml += '<img src="/exports/images/' + imgName + '" style="max-width:120px;border-radius:6px;margin:4px 0">';
-        if (meta.prompt) assetHtml += '<span style="font-size:11px;color:var(--text-muted)">' + escapeHtml((meta.prompt || '').slice(0, 80)) + '</span>';
-        assetHtml += '</div>';
+        var imgMeta = img.metadata_json ? (typeof img.metadata_json === 'string' ? JSON.parse(img.metadata_json) : img.metadata_json) : (img.metadata || {});
+        var imgItem = createEl('div', { className: 'card-asset-item' });
+        imgItem.appendChild(createEl('strong', { textContent: '立绘' }));
+        imgItem.appendChild(createEl('br'));
+        if (imgName) {
+          imgItem.appendChild(createEl('img', {
+            src: '/exports/images/' + imgName,
+            style: 'max-width:120px;border-radius:6px;margin:4px 0'
+          }));
+        }
+        if (imgMeta.prompt) {
+          imgItem.appendChild(createEl('span', {
+            style: 'font-size:11px;color:var(--text-muted)',
+            textContent: (imgMeta.prompt || '').slice(0, 80)
+          }));
+        }
+        assetsEl.appendChild(imgItem);
       }
       if (selectedAssets.voice_identity) {
         var v = selectedAssets.voice_identity;
         var vMeta = v.metadata_json ? (typeof v.metadata_json === 'string' ? JSON.parse(v.metadata_json) : v.metadata_json) : (v.metadata || {});
         var voiceName = vMeta.voice_name || (v.path || '').slice(0, 16);
         var voiceId = (v.path || '').split(/[/\\]/).pop() || voiceName;
-        assetHtml += '<div class="card-asset-item"><strong>声音</strong><br>';
-        assetHtml += '<span style="font-size:11px">' + escapeHtml(voiceName) + ' (' + escapeHtml(voiceId.slice(0, 12)) + '...)</span>';
-        assetHtml += '</div>';
+        var vItem = createEl('div', { className: 'card-asset-item' });
+        vItem.appendChild(createEl('strong', { textContent: '声音' }));
+        vItem.appendChild(createEl('br'));
+        vItem.appendChild(createEl('span', {
+          style: 'font-size:11px',
+          textContent: voiceName + ' (' + voiceId.slice(0, 12) + '...)'
+        }));
+        assetsEl.appendChild(vItem);
       }
       if (selectedAssets.voice_audio) {
         var aName = (selectedAssets.voice_audio.path || '').split(/[/\\]/).pop();
-        assetHtml += '<audio controls src="/exports/voices/' + aName + '" style="width:100%;margin-top:4px"></audio>';
+        assetsEl.appendChild(createEl('audio', {
+          controls: true,
+          src: '/exports/voices/' + aName,
+          style: 'width:100%;margin-top:4px'
+        }));
       }
-      assetsEl.innerHTML = assetHtml || '<p style="color:var(--text-muted)">暂无绑定资产</p>';
+      if (!assetsEl.hasChildNodes()) {
+        assetsEl.appendChild(createEl('p', { style: 'color:var(--text-muted)', textContent: '暂无绑定资产' }));
+      }
       wireExclusiveAudio(assetsEl);
       assetSection.classList.remove('hidden');
     }
@@ -485,28 +542,30 @@
         return;
       }
       sessions.forEach(function(s) {
-        var div = document.createElement('div');
-        div.className = 'library-item';
-        div.dataset.sessionId = s.id;
         var name = s.title || '未命名';
         var concept = s.core_concept || '';
         var score = Math.round((s.completion_score || 0) * 100);
         var date = new Date(s.updated_at).toLocaleDateString('zh-CN');
-        div.innerHTML =
-          '<div class="library-item-avatar">' + escapeHtml(name[0] || '?') + '</div>' +
-          '<div class="library-item-info">' +
-            '<div class="library-item-name">' + escapeHtml(name) + '</div>' +
-            '<div class="library-item-concept">' + escapeHtml(concept || '无描述') + '</div>' +
-          '</div>' +
-          '<div class="library-item-meta">' +
-            '<div class="library-item-score">' + score + '%</div>' +
-            '<div class="library-item-date">' + escapeHtml(date) + '</div>' +
-          '</div>' +
-          '<button class="library-item-del" data-sid="' + escapeAttr(s.id) + '">&times;</button>';
-        div.querySelector('.library-item-del').addEventListener('click', function(e) {
-          e.stopPropagation();
-          deleteSession(s.id, name);
-        });
+
+        var div = createEl('div', { className: 'library-item', dataset: { sessionId: s.id } });
+        div.appendChild(createEl('div', { className: 'library-item-avatar', textContent: name[0] || '?' }));
+        var info = createEl('div', { className: 'library-item-info' });
+        info.appendChild(createEl('div', { className: 'library-item-name', textContent: name }));
+        info.appendChild(createEl('div', { className: 'library-item-concept', textContent: concept || '无描述' }));
+        div.appendChild(info);
+        var meta = createEl('div', { className: 'library-item-meta' });
+        meta.appendChild(createEl('div', { className: 'library-item-score', textContent: score + '%' }));
+        meta.appendChild(createEl('div', { className: 'library-item-date', textContent: date }));
+        div.appendChild(meta);
+        div.appendChild(createEl('button', {
+          type: 'button',
+          className: 'library-item-del',
+          innerHTML: '&times;',
+          on_click: function(e) {
+            e.stopPropagation();
+            deleteSession(s.id, name);
+          }
+        }));
         div.addEventListener('click', function() { resumeSession(s.id); });
         libraryList.appendChild(div);
       });
@@ -667,6 +726,15 @@
         '<div class="asset-panel-header">' +
           '<h3>资产历史</h3>' +
           '<div class="asset-panel-actions">' +
+            '<select id="asset-type-filter" class="voice-select" style="margin-right:6px">' +
+              '<option value="">全部类型</option>' +
+              '<option value="image_locked">已锁定立绘</option>' +
+              '<option value="image_candidate">立绘候选</option>' +
+              '<option value="voice_identity">已锁定声音</option>' +
+              '<option value="voice_preview">声音候选</option>' +
+              '<option value="voice_sample">试听样本</option>' +
+              '<option value="voice_performance_candidate">表演候选</option>' +
+            '</select>' +
             '<button type="button" class="btn-adopt-idea" id="btn-asset-cleanup">清理未选</button>' +
             '<button type="button" class="btn-close-card" id="btn-asset-close">&times;</button>' +
           '</div>' +
@@ -686,14 +754,18 @@
         await loadAssets();
       } catch(e) { showToast(e.message, 'error'); }
     });
+    assetOverlay.querySelector('#asset-type-filter').addEventListener('change', function() {
+      loadAssets(this.value || null);
+    });
     assetOverlay.addEventListener('click', function(e) {
       if (e.target === assetOverlay) assetOverlay.classList.add('hidden');
     });
   }
 
   function renderAssets(assets) {
+    assetContent.innerHTML = '';
     if (!assets.length) {
-      assetContent.innerHTML = '<div class="asset-empty">还没有生成资产。</div>';
+      assetContent.appendChild(createEl('div', { className: 'asset-empty', textContent: '还没有生成资产。' }));
       return;
     }
     var grouped = {};
@@ -704,76 +776,106 @@
     });
     var order = ['image_locked', 'image_candidate', 'voice_identity', 'voice_preview', 'voice_sample', 'voice_performance_candidate'];
     var keys = order.filter(function(k) { return grouped[k]; }).concat(Object.keys(grouped).filter(function(k) { return order.indexOf(k) < 0; }));
-    var html = '';
+
     keys.forEach(function(type) {
-      html += '<section class="asset-section"><h4>' + escapeHtml(assetTypeLabel(type)) + '</h4><div class="asset-grid">';
+      var section = createEl('section', { className: 'asset-section' });
+      section.appendChild(createEl('h4', { textContent: assetTypeLabel(type) }));
+      var grid = createEl('div', { className: 'asset-grid' });
+
       grouped[type].forEach(function(asset) {
         var meta = asset.metadata || {};
         var url = assetDisplayUrl(asset);
-        html += '<article class="asset-card' + (asset.selected ? ' selected' : '') + '">';
-        if (url && type.indexOf('image_') === 0) html += '<img class="asset-thumb" src="' + escapeAttr(url) + '" alt="">';
-        if (url && type.indexOf('voice_') === 0) html += '<audio controls src="' + escapeAttr(url) + '"></audio>';
-        html += '<div class="asset-meta">';
-        html += '<strong>' + escapeHtml(meta.label || assetTypeLabel(type)) + '</strong>';
-        html += '<span>' + escapeHtml(asset.provider || '') + '</span>';
-        if (asset.created_at) html += '<span>' + escapeHtml(new Date(asset.created_at).toLocaleString('zh-CN')) + '</span>';
-        if (asset.selected) html += '<em>已选中</em>';
-        html += '</div><div class="asset-actions">';
-        if (type === 'image_locked') {
-          html += '<button type="button" class="btn-adopt-idea asset-variation-image" data-id="' + escapeAttr(asset.id) + '">生成变体</button>';
-        } else if (type === 'image_candidate') {
-          html += '<button type="button" class="btn-adopt-idea asset-lock-image" data-id="' + escapeAttr(asset.id) + '" data-style="' + escapeAttr(meta.style || '') + '" data-prompt="' + escapeAttr(meta.prompt || '') + '">锁定为 canon</button>';
-        } else {
-          html += '<button type="button" class="btn-adopt-idea asset-select" data-id="' + escapeAttr(asset.id) + '" data-type="' + escapeAttr(type) + '">选中</button>';
-        }
-        html += '</div></article>';
-      });
-      html += '</div></section>';
-    });
-    assetContent.innerHTML = html;
-    wireExclusiveAudio(assetContent);
+        var cardClass = 'asset-card' + (asset.selected ? ' selected' : '');
+        var card = createEl('article', { className: cardClass });
 
-    assetContent.querySelectorAll('.asset-lock-image').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        try {
-          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/visual-canon-lock', {
-            asset_id: Number(this.dataset.id),
-            style: this.dataset.style || '',
-            prompt: this.dataset.prompt || '',
-          });
-          showToast(data.ok ? '已锁定视觉 canon' : '锁定失败', data.ok ? 'success' : 'error');
-          await loadAssets();
-        } catch(e) { showToast(e.message, 'error'); }
+        if (url && type.indexOf('image_') === 0) {
+          card.appendChild(createEl('img', { className: 'asset-thumb', src: url, alt: '' }));
+        }
+        if (url && type.indexOf('voice_') === 0) {
+          card.appendChild(createEl('audio', { controls: true, src: url }));
+        }
+
+        var metaEl = createEl('div', { className: 'asset-meta' });
+        metaEl.appendChild(createEl('strong', { textContent: meta.label || assetTypeLabel(type) }));
+        metaEl.appendChild(createEl('span', { textContent: asset.provider || '' }));
+        if (asset.created_at) {
+          metaEl.appendChild(createEl('span', { textContent: new Date(asset.created_at).toLocaleString('zh-CN') }));
+        }
+        if (asset.selected) {
+          metaEl.appendChild(createEl('em', { textContent: '已选中' }));
+        }
+        card.appendChild(metaEl);
+
+        var actions = createEl('div', { className: 'asset-actions' });
+        if (type === 'image_locked') {
+          actions.appendChild(createEl('button', {
+            type: 'button',
+            className: 'btn-adopt-idea asset-variation-image',
+            textContent: '生成变体',
+            dataset: { id: String(asset.id) },
+            on_click: async function() {
+              try {
+                ensureImageOverlay();
+                imageOverlay.classList.remove('hidden');
+                imageContent.innerHTML = '';
+                imageContent.appendChild(createEl('div', { className: 'image-loading', textContent: '正在基于已锁定立绘生成一致性变体…' }));
+                var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-variations', {});
+                renderImageCandidates(data.candidates || []);
+                await loadAssets();
+              } catch(e) { showToast(e.message, 'error'); }
+            }
+          }));
+        } else if (type === 'image_candidate') {
+          actions.appendChild(createEl('button', {
+            type: 'button',
+            className: 'btn-adopt-idea asset-lock-image',
+            textContent: '锁定为 canon',
+            dataset: { id: String(asset.id), style: meta.style || '', prompt: meta.prompt || '' },
+            on_click: async function() {
+              try {
+                var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/visual-canon-lock', {
+                  asset_id: Number(this.dataset.id),
+                  style: this.dataset.style || '',
+                  prompt: this.dataset.prompt || '',
+                });
+                showToast(data.ok ? '已锁定视觉 canon' : '锁定失败', data.ok ? 'success' : 'error');
+                await loadAssets();
+              } catch(e) { showToast(e.message, 'error'); }
+            }
+          }));
+        } else {
+          actions.appendChild(createEl('button', {
+            type: 'button',
+            className: 'btn-adopt-idea asset-select',
+            textContent: '选中',
+            dataset: { id: String(asset.id), type: type },
+            on_click: async function() {
+              try {
+                await apiCall('POST', '/api/sessions/' + state.sessionId + '/assets/' + this.dataset.id + '/select', { asset_type: this.dataset.type || '' });
+                showToast('已选中资产', 'success');
+                await loadAssets();
+              } catch(e) { showToast(e.message, 'error'); }
+            }
+          }));
+        }
+        card.appendChild(actions);
+        grid.appendChild(card);
       });
+
+      section.appendChild(grid);
+      assetContent.appendChild(section);
     });
-    assetContent.querySelectorAll('.asset-variation-image').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        try {
-          ensureImageOverlay();
-          imageOverlay.classList.remove('hidden');
-          imageContent.innerHTML = '<div class="image-loading">正在基于已锁定立绘生成一致性变体…</div>';
-          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-variations', {});
-          renderImageCandidates(data.candidates || []);
-          await loadAssets();
-        } catch(e) { showToast(e.message, 'error'); }
-      });
-    });
-    assetContent.querySelectorAll('.asset-select').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        try {
-          await apiCall('POST', '/api/sessions/' + state.sessionId + '/assets/' + this.dataset.id + '/select', { asset_type: this.dataset.type || '' });
-          showToast('已选中资产', 'success');
-          await loadAssets();
-        } catch(e) { showToast(e.message, 'error'); }
-      });
-    });
+    wireExclusiveAudio(assetContent);
   }
 
-  async function loadAssets() {
+  async function loadAssets(assetType) {
     if (!state.sessionId) return;
     ensureAssetOverlay();
-    assetContent.innerHTML = '<div class="asset-loading">正在读取资产…</div>';
-    var data = await apiCall('GET', '/api/sessions/' + state.sessionId + '/assets');
+    assetContent.innerHTML = '';
+    assetContent.appendChild(createEl('div', { className: 'asset-loading', textContent: '正在读取资产…' }));
+    var url = '/api/sessions/' + state.sessionId + '/assets';
+    if (assetType) url += '?asset_type=' + encodeURIComponent(assetType);
+    var data = await apiCall('GET', url);
     renderAssets(data.assets || []);
   }
 
@@ -831,75 +933,94 @@
   }
 
   function renderImageCandidates(candidates) {
+    imageContent.innerHTML = '';
     if (!candidates.length) {
-      imageContent.innerHTML = '<div class="image-empty">没有生成可用候选。</div>';
+      imageContent.appendChild(createEl('div', { className: 'image-empty', textContent: '没有生成可用候选。' }));
       return;
     }
-    var html = '<div class="image-candidate-grid">';
+    var grid = createEl('div', { className: 'image-candidate-grid' });
+
     candidates.forEach(function(c) {
-      html += '<div class="image-candidate">';
-      html += '<div class="image-candidate-title">' + escapeHtml(c.label || ('候选 ' + c.index)) + '</div>';
+      var card = createEl('div', { className: 'image-candidate' });
+      card.appendChild(createEl('div', { className: 'image-candidate-title', textContent: c.label || ('候选 ' + c.index) }));
+
       if (c.image_url) {
-        html += '<img src="' + escapeAttr(c.image_url) + '" alt="' + escapeAttr(c.label || 'image candidate') + '">';
-        if (c.critique && c.critique.overall_score) {
-          html += '<div class="image-critique">评分: ' + Math.round(c.critique.overall_score) + '/10';
-          if (c.critique.passed === false) html += ' <span style="color:var(--error)">未通过</span>';
-          html += '</div>';
+        card.appendChild(createEl('img', { src: c.image_url, alt: c.label || 'image candidate' }));
+        card.appendChild(createEl('div', {
+          className: 'image-critique-note',
+          textContent: '当前评审基于 prompt 文字，尚未对真实生成图做视觉判断。'
+        }));
+        if (c.critique && c.critique.overall_score != null) {
+          var critiqueText = 'Prompt 评分: ' + Math.round(c.critique.overall_score) + '/10';
+          if (c.critique.passed === false) critiqueText += ' 未通过';
+          card.appendChild(createEl('div', { className: 'image-critique', textContent: critiqueText }));
         }
       } else {
-        html += '<div class="image-error">';
-        html += '<strong>' + escapeHtml(c.label || '生成失败') + '</strong><br>';
-        html += escapeHtml(c.error || '未知错误') + '<br>';
-        html += '<button class="btn-adopt-idea image-retry-btn" data-style="' + escapeAttr(c.style || '') + '" data-prompt="' + escapeAttr(c.prompt || '') + '" data-neg-prompt="' + escapeAttr(c.negative_prompt || '') + '">重试此风格</button>';
-        html += '</div>';
+        var errBox = createEl('div', { className: 'image-error' });
+        errBox.appendChild(createEl('strong', { textContent: c.label || '生成失败' }));
+        errBox.appendChild(createEl('br'));
+        errBox.appendChild(document.createTextNode(c.error || '未知错误'));
+        errBox.appendChild(createEl('br'));
+        errBox.appendChild(createEl('button', {
+          type: 'button',
+          className: 'btn-adopt-idea image-retry-btn',
+          textContent: '重试此风格',
+          dataset: { style: c.style || '', prompt: c.prompt || '', negPrompt: c.negative_prompt || '' },
+          on_click: async function() {
+            var style = this.dataset.style;
+            var prompt = this.dataset.prompt;
+            var negPrompt = this.dataset.negPrompt || '';
+            showToast('正在重试「' + style + '」风格……', 'success');
+            try {
+              var retryBody = { retry_style: style };
+              if (prompt) { retryBody.retry_prompt = prompt; retryBody.retry_negative_prompt = negPrompt; }
+              var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', retryBody);
+              renderImageCandidates(data.candidates || []);
+            } catch(e) { showToast(e.message, 'error'); }
+          }
+        }));
+        card.appendChild(errBox);
       }
-      html += '<div class="image-candidate-actions">';
+
+      var actions = createEl('div', { className: 'image-candidate-actions' });
       if (c.asset_id) {
-        html += '<button type="button" class="btn-adopt-idea image-lock-btn" data-asset="' + escapeAttr(c.asset_id) + '" data-style="' + escapeAttr(c.style || '') + '" data-prompt="' + escapeAttr(c.prompt || '') + '">锁定</button>';
+        actions.appendChild(createEl('button', {
+          type: 'button',
+          className: 'btn-adopt-idea image-lock-btn',
+          textContent: '锁定',
+          dataset: { asset: c.asset_id, style: c.style || '', prompt: c.prompt || '' },
+          on_click: async function() {
+            try {
+              var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/visual-canon-lock', {
+                asset_id: Number(this.dataset.asset),
+                style: this.dataset.style || '',
+                prompt: this.dataset.prompt || '',
+              });
+              showToast(data.ok ? '已锁定角色视觉 canon' : '锁定失败', data.ok ? 'success' : 'error');
+            } catch(e) { showToast(e.message, 'error'); }
+          }
+        }));
       }
       if (c.prompt) {
-        html += '<button type="button" class="btn-adopt-idea image-copy-btn" data-prompt="' + escapeAttr(c.prompt) + '">复制 Prompt</button>';
+        actions.appendChild(createEl('button', {
+          type: 'button',
+          className: 'btn-adopt-idea image-copy-btn',
+          textContent: '复制 Prompt',
+          dataset: { prompt: c.prompt },
+          on_click: function() {
+            navigator.clipboard.writeText(this.dataset.prompt || '').then(function() {
+              showToast('Prompt 已复制', 'success');
+            }).catch(function() {
+              showToast('复制失败', 'error');
+            });
+          }
+        }));
       }
-      html += '</div></div>';
+      card.appendChild(actions);
+      grid.appendChild(card);
     });
-    html += '</div>';
-    imageContent.innerHTML = html;
 
-    imageContent.querySelectorAll('.image-lock-btn').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        try {
-          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/visual-canon-lock', {
-            asset_id: Number(this.dataset.asset),
-            style: this.dataset.style || '',
-            prompt: this.dataset.prompt || '',
-          });
-          showToast(data.ok ? '已锁定角色视觉 canon' : '锁定失败', data.ok ? 'success' : 'error');
-        } catch(e) { showToast(e.message, 'error'); }
-      });
-    });
-    imageContent.querySelectorAll('.image-retry-btn').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        var style = this.dataset.style;
-        var prompt = this.dataset.prompt;
-        var negPrompt = this.dataset['neg-prompt'] || this.dataset.negPrompt || '';
-        showToast('正在重试「' + escapeHtml(style) + '」风格……', 'success');
-        try {
-          var retryBody = { retry_style: style };
-          if (prompt) { retryBody.retry_prompt = prompt; retryBody.retry_negative_prompt = negPrompt; }
-          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', retryBody);
-          renderImageCandidates(data.candidates || []);
-        } catch(e) { showToast(e.message, 'error'); }
-      });
-    });
-    imageContent.querySelectorAll('.image-copy-btn').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        navigator.clipboard.writeText(this.dataset.prompt || '').then(function() {
-          showToast('Prompt 已复制', 'success');
-        }).catch(function() {
-          showToast('复制失败', 'error');
-        });
-      });
-    });
+    imageContent.appendChild(grid);
   }
 
   $('#btn-image').addEventListener('click', async function() {
@@ -983,29 +1104,9 @@
           wireExclusiveAudio(player);
         }
         // Render per-unit TTS results when available
-        var perUnit = data.per_unit_results;
-        if (perUnit && perUnit.length > 0) {
-          var puContainer = voiceContent.querySelector('.voice-per-unit') || document.createElement('div');
-          puContainer.className = 'voice-per-unit';
-          var puHtml = '<div class="voice-summary" style="margin-top:8px">逐句试听</div>';
-          perUnit.forEach(function(pu) {
-            if (pu.error) { puHtml += '<div class="voice-loading" style="color:var(--error)">第' + (pu.unit_index + 1) + '句失败: ' + escapeHtml(pu.error) + '</div>'; }
-            else if (pu.audio_path) {
-              var puAudioUrl = '/exports/voices/' + pu.audio_path.replace(/\\/g, '/').split('/').pop();
-              var puText = pu.clean_text ? escapeHtml(pu.clean_text) : '';
-              var badges = [];
-              if (pu.emotion) badges.push(pu.emotion);
-              if (pu.context) badges.push(pu.context);
-              var badgeHtml = badges.length > 0 ? ' <span class="voice-unit-badges">' + badges.map(function(b){return '<span class="voice-unit-badge">'+escapeHtml(b)+'</span>';}).join('') + '</span>' : '';
-              puHtml += '<div class="voice-unit-item"><div class="voice-unit-text">' + escapeHtml('#' + (pu.unit_index + 1)) + ' ' + puText + badgeHtml + '</div><audio controls src="' + escapeAttr(puAudioUrl) + '"></audio></div>';
-            }
-          });
-          puContainer.innerHTML = puHtml;
-          wireExclusiveAudio(puContainer);
-          var existing = voiceContent.querySelector('.voice-per-unit');
-          if (!existing && player && player.parentNode) {
-            player.parentNode.appendChild(puContainer);
-          }
+        if (data.per_unit_results && data.per_unit_results.length > 0) {
+          var sampleSection = voiceContent.querySelector('.voice-sample');
+          renderPerUnitResults(data.per_unit_results, voiceContent, sampleSection);
         }
         showToast('试听已生成', 'success');
       } else {
@@ -1028,30 +1129,152 @@
   });
 
   function renderVoiceCandidates(candidates, provider) {
+    voiceContent.innerHTML = '';
     var isVoiceIdentity = provider === 'elevenlabs';
-    var html = '<div class="voice-candidate-list">';
-    html += '<div class="voice-summary">' + (isVoiceIdentity ? '三候选音色对比' : '表现参数对比') + '</div>';
+    var list = createEl('div', { className: 'voice-candidate-list' });
+    list.appendChild(createEl('div', { className: 'voice-summary', textContent: isVoiceIdentity ? '三候选音色对比' : '表现参数对比' }));
+
     candidates.forEach(function(c) {
-      html += '<div class="voice-candidate">';
-      html += '<div class="voice-candidate-header"><strong>' + escapeHtml(c.label || ('候选 ' + c.index)) + '</strong>';
-      if (c.generated_voice_id) html += '<button class="btn-adopt-idea voice-select-candidate" data-index="' + escapeAttr(c.index || '') + '" data-generated="' + escapeAttr(c.generated_voice_id) + '">选择</button>';
-      html += '</div>';
-      if (c.audio_url) html += '<audio controls src="' + escapeAttr(c.audio_url) + '" style="width:100%;margin-top:4px"></audio>';
-      else if (c.error) html += '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(c.error) + '</div>';
-      html += '</div>';
+      var card = createEl('div', { className: 'voice-candidate' });
+      var header = createEl('div', { className: 'voice-candidate-header' });
+      header.appendChild(createEl('strong', { textContent: c.label || ('候选 ' + c.index) }));
+      if (c.generated_voice_id) {
+        header.appendChild(createEl('button', {
+          type: 'button',
+          className: 'btn-adopt-idea voice-select-candidate',
+          textContent: '选择',
+          dataset: { index: String(c.index || ''), generated: c.generated_voice_id },
+          on_click: async function() {
+            try {
+              var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates/select', { index: Number(this.dataset.index || 1), generated_voice_id: this.dataset.generated || '' });
+              if (data.voice_profile) renderVoiceProfile(data.voice_profile);
+              showToast('已保存这个角色音色', 'success');
+            } catch(e) { showToast(e.message, 'error'); }
+          }
+        }));
+      }
+      card.appendChild(header);
+      if (c.audio_url) {
+        card.appendChild(createEl('audio', { controls: true, src: c.audio_url, style: 'width:100%;margin-top:4px' }));
+      } else if (c.error) {
+        card.appendChild(createEl('div', { className: 'voice-loading', style: 'color:var(--error)', textContent: c.error }));
+      }
+      list.appendChild(card);
     });
-    html += '</div>';
-    voiceContent.innerHTML = html;
+
+    voiceContent.appendChild(list);
     wireExclusiveAudio(voiceContent);
-    voiceContent.querySelectorAll('.voice-select-candidate').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
-        try {
-          var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-sample-candidates/select', { index: Number(this.dataset.index || 1), generated_voice_id: this.dataset.generated || '' });
-          if (data.voice_profile) renderVoiceProfile(data.voice_profile);
-          showToast('已保存这个角色音色', 'success');
-        } catch(e) { showToast(e.message, 'error'); }
-      });
+  }
+
+  function renderPerUnitResults(perUnit, parentNode, afterNode) {
+    if (!perUnit || !perUnit.length) return;
+    var existing = parentNode.querySelector('.voice-per-unit');
+    if (existing) existing.remove();
+    var container = createEl('div', { className: 'voice-per-unit' });
+    container.appendChild(createEl('div', { className: 'voice-summary', style: 'margin-top:8px', textContent: '逐句试听' }));
+
+    perUnit.forEach(function(pu) {
+      if (pu.error) {
+        container.appendChild(createEl('div', { className: 'voice-loading', style: 'color:var(--error)', textContent: '第' + (pu.unit_index + 1) + '句失败: ' + pu.error }));
+        return;
+      }
+      if (!pu.audio_path) return;
+
+      var puAudioUrl = '/exports/voices/' + pu.audio_path.replace(/\\/g, '/').split('/').pop();
+      var item = createEl('div', { className: 'voice-unit-item', dataset: { unitIndex: String(pu.unit_index) } });
+
+      var textLine = createEl('div', { className: 'voice-unit-text' });
+      textLine.appendChild(document.createTextNode('#' + (pu.unit_index + 1) + ' ' + (pu.clean_text || '')));
+      var badges = [];
+      if (pu.emotion) badges.push(pu.emotion);
+      if (pu.speed) badges.push(pu.speed);
+      if (pu.volume) badges.push(pu.volume);
+      if (pu.context) badges.push(pu.context);
+      if (badges.length > 0) {
+        var badgeWrap = createEl('span', { className: 'voice-unit-badges' });
+        badges.forEach(function(b) {
+          badgeWrap.appendChild(createEl('span', { className: 'voice-unit-badge', textContent: b }));
+        });
+        textLine.appendChild(badgeWrap);
+      }
+      item.appendChild(textLine);
+      item.appendChild(createEl('audio', { controls: true, src: puAudioUrl }));
+
+      var unitMeta = createEl('div', { className: 'voice-unit-meta', style: 'font-size:11px;color:var(--text-muted)' });
+      unitMeta.appendChild(document.createTextNode('emotion=' + (pu.emotion || '—') + ' speed=' + (pu.speed || '—') + ' volume=' + (pu.volume || '—')));
+      item.appendChild(unitMeta);
+
+      var unitActions = createEl('div', { className: 'voice-unit-actions', style: 'margin-top:4px' });
+      unitActions.appendChild(createEl('button', {
+        type: 'button',
+        className: 'btn-search-go',
+        style: 'padding:2px 8px;font-size:12px',
+        textContent: '重生成此句',
+        dataset: { unitIndex: String(pu.unit_index) },
+        on_click: async function() {
+          var btn = this;
+          btn.disabled = true;
+          btn.textContent = '生成中…';
+          try {
+            var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-unit-regenerate', { unit_index: Number(btn.dataset.unitIndex) });
+            if (data.ok) {
+              var audio = item.querySelector('audio');
+              if (audio) audio.src = data.audio_url;
+              showToast('已重生成第' + (data.unit_index + 1) + '句', 'success');
+            } else {
+              showToast(data.error || '重生成失败', 'error');
+            }
+          } catch(e) { showToast(e.message, 'error'); }
+          btn.disabled = false;
+          btn.textContent = '重生成此句';
+        }
+      }));
+      unitActions.appendChild(createEl('button', {
+        type: 'button',
+        className: 'btn-adopt-idea',
+        style: 'margin-left:6px;padding:2px 8px;font-size:12px',
+        textContent: '设为最佳',
+        dataset: { unitIndex: String(pu.unit_index) },
+        on_click: async function() {
+          try {
+            await apiCall('POST', '/api/sessions/' + state.sessionId + '/voice-unit-favorite', { unit_index: Number(this.dataset.unitIndex) });
+            showToast('已保存为最佳句参数', 'success');
+          } catch(e) { showToast(e.message, 'error'); }
+        }
+      }));
+      item.appendChild(unitActions);
+      container.appendChild(item);
     });
+
+    renderListeningChecklist(container);
+
+    if (afterNode && afterNode.parentNode) {
+      afterNode.parentNode.insertBefore(container, afterNode.nextSibling);
+    } else {
+      parentNode.appendChild(container);
+    }
+    wireExclusiveAudio(container);
+  }
+
+  function renderListeningChecklist(container) {
+    var existing = container.querySelector('.voice-listening-checklist');
+    if (existing) return;
+    var wrap = createEl('div', { className: 'voice-listening-checklist', style: 'margin-top:12px;padding:8px;border:1px solid var(--border);border-radius:6px' });
+    wrap.appendChild(createEl('div', { className: 'voice-summary', textContent: '听感自检清单' }));
+    var items = [
+      '是否像真人（非播音腔/非机器感）',
+      '是否像这个角色',
+      '中文断句是否自然',
+      '情绪与台词是否匹配',
+      '语速是否合适',
+    ];
+    items.forEach(function(label) {
+      var row = createEl('label', { style: 'display:block;font-size:12px;margin:4px 0' });
+      row.appendChild(createEl('input', { type: 'checkbox' }));
+      row.appendChild(document.createTextNode(' ' + label));
+      wrap.appendChild(row);
+    });
+    container.appendChild(wrap);
   }
 
   $('#btn-voice-advanced-toggle').addEventListener('click', function() {
@@ -1097,14 +1320,12 @@
     var rhOverlay = document.getElementById('rehearsal-overlay');
     var rhContent = document.getElementById('rehearsal-content');
     rhOverlay.classList.remove('hidden');
-    rhContent.innerHTML = '<div class="voice-loading">准备排练…</div>';
+    rhContent.innerHTML = '';
     var sceneCtx = (state.draft && state.draft.scenario) ? state.draft.scenario : '';
-    rhContent.innerHTML = (
-      '<div class="voice-sample-text" style="margin-bottom:8px">场景: ' + escapeHtml(sceneCtx || '未设定') + '</div>' +
-      '<textarea id="rh-user-line" class="voice-edit-input" rows="2" placeholder="输入一句你对角色说的话…" style="width:100%;margin-bottom:8px"></textarea>' +
-      '<button id="btn-rh-go" class="btn-search-go">发送</button>' +
-      '<div id="rh-result"></div>'
-    );
+    rhContent.appendChild(createEl('div', { className: 'voice-sample-text', style: 'margin-bottom:8px', textContent: '场景: ' + (sceneCtx || '未设定') }));
+    rhContent.appendChild(createEl('textarea', { id: 'rh-user-line', className: 'voice-edit-input', rows: 2, placeholder: '输入一句你对角色说的话…', style: 'width:100%;margin-bottom:8px' }));
+    rhContent.appendChild(createEl('button', { id: 'btn-rh-go', className: 'btn-search-go', textContent: '发送' }));
+    rhContent.appendChild(createEl('div', { id: 'rh-result' }));
     document.getElementById('btn-rh-go').addEventListener('click', async function() {
       var userLine = document.getElementById('rh-user-line').value.trim();
       if (!userLine) { showToast('请输入一句话', 'error'); return; }
@@ -1117,29 +1338,35 @@
           generate_audio: true,
         });
         var beat = data.beat || {};
-        var html = '';
+        resultEl.innerHTML = '';
         if (data.response_text) {
-          html += '<div class="voice-summary" style="margin-top:10px">角色回应</div>';
-          html += '<div class="voice-sample-text" style="font-size:15px;padding:8px 12px;margin:6px 0">' + escapeHtml(data.response_text) + '</div>';
+          resultEl.appendChild(createEl('div', { className: 'voice-summary', style: 'margin-top:10px', textContent: '角色回应' }));
+          resultEl.appendChild(createEl('div', { className: 'voice-sample-text', style: 'font-size:15px;padding:8px 12px;margin:6px 0', textContent: data.response_text }));
           if (data.audio_url) {
-            html += '<audio controls src="' + escapeAttr(data.audio_url) + '" style="width:100%;margin-top:4px"></audio>';
+            resultEl.appendChild(createEl('audio', { controls: true, src: data.audio_url, style: 'width:100%;margin-top:4px' }));
           }
         }
-        html += '<div class="voice-summary">拍点分析</div>';
-        html += '<div class="voice-grid">';
+        resultEl.appendChild(createEl('div', { className: 'voice-summary', textContent: '拍点分析' }));
+        var grid = createEl('div', { className: 'voice-grid' });
         var beatFields = [
           ['场景状态', beat.scene_state], ['用户意图', beat.user_intent],
           ['角色内心', beat.character_inner_reaction], ['关系变化', beat.relationship_delta],
           ['本轮目的', beat.beat_goal], ['回应方式', beat.response_mode],
         ];
-        beatFields.forEach(function(f) { html += '<div class="voice-item"><div class="voice-item-label">' + escapeHtml(f[0]) + '</div><div class="voice-item-value">' + escapeHtml(f[1] || '—') + '</div></div>'; });
+        beatFields.forEach(function(f) {
+          var item = createEl('div', { className: 'voice-item' });
+          item.appendChild(createEl('div', { className: 'voice-item-label', textContent: f[0] }));
+          item.appendChild(createEl('div', { className: 'voice-item-value', textContent: f[1] || '—' }));
+          grid.appendChild(item);
+        });
         var vd = beat.voice_direction || {};
-        html += '<div class="voice-item"><div class="voice-item-label">情绪</div><div class="voice-item-value">' + escapeHtml(vd.emotion || '—') + '</div></div>';
-        html += '<div class="voice-item"><div class="voice-item-label">音量</div><div class="voice-item-value">' + escapeHtml(vd.volume || '—') + '</div></div>';
-        html += '<div class="voice-item"><div class="voice-item-label">语速</div><div class="voice-item-value">' + escapeHtml(vd.speed || '—') + '</div></div>';
-        html += '<div class="voice-item"><div class="voice-item-label">停顿</div><div class="voice-item-value">' + escapeHtml(vd.pause || '—') + '</div></div>';
-        html += '</div>';
-        resultEl.innerHTML = html;
+        [['情绪', vd.emotion], ['音量', vd.volume], ['语速', vd.speed], ['停顿', vd.pause]].forEach(function(f) {
+          var item = createEl('div', { className: 'voice-item' });
+          item.appendChild(createEl('div', { className: 'voice-item-label', textContent: f[0] }));
+          item.appendChild(createEl('div', { className: 'voice-item-value', textContent: f[1] || '—' }));
+          grid.appendChild(item);
+        });
+        resultEl.appendChild(grid);
       } catch(e) { resultEl.innerHTML = '<div class="voice-loading" style="color:var(--error)">' + escapeHtml(e.message) + '</div>'; }
     });
   });
@@ -1393,39 +1620,55 @@
   }
 
   function renderInspirationCard(insp) {
-    var html = '<div class="inspiration-card">';
-    html += '<h4>' + escapeHtml(insp.title || '搜索灵感') + '</h4>';
-    if (insp.summary) html += '<div class="insp-summary">' + escapeHtml(insp.summary) + '</div>';
-    if (insp.usable_ideas && insp.usable_ideas.length > 0) {
-      html += '<ul class="insp-ideas">';
-      insp.usable_ideas.forEach(function(idea, i) {
-        html += '<li><span>' + escapeHtml(idea) + '</span><button class="btn-adopt-idea" data-idea="' + i + '">采用</button></li>';
-      });
-      html += '</ul>';
+    searchResult.innerHTML = '';
+    var card = createEl('div', { className: 'inspiration-card' });
+    card.appendChild(createEl('h4', { textContent: insp.title || '搜索灵感' }));
+    if (insp.summary) {
+      card.appendChild(createEl('div', { className: 'insp-summary', textContent: insp.summary }));
     }
-    if (insp.cautions && insp.cautions.length > 0) {
-      html += '<div class="insp-cautions">注意: ' + escapeHtml(insp.cautions.join('; ')) + '</div>';
-    }
-    if (insp.sources && insp.sources.length > 0) {
-      html += '<div class="insp-sources">参考来源: ';
-      insp.sources.forEach(function(s) {
-        html += '<a href="' + escapeAttr(s.url) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml((s.title || s.url).slice(0, 30)) + '</a> ';
-      });
-      html += '</div>';
-    }
-    html += '</div>';
-    searchResult.innerHTML = html;
 
-    // Wire up adopt buttons
-    $$('.btn-adopt-idea').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var idea = insp.usable_ideas[parseInt(this.dataset.idea)];
-        searchPanel.classList.add('hidden');
-        // Auto-send the adopted idea to the AI
-        chatInput.value = '请参考这个方向来完善角色：' + idea;
-        sendMessage();
+    if (insp.usable_ideas && insp.usable_ideas.length > 0) {
+      var list = createEl('ul', { className: 'insp-ideas' });
+      insp.usable_ideas.forEach(function(idea, i) {
+        var li = createEl('li');
+        li.appendChild(createEl('span', { textContent: idea }));
+        li.appendChild(createEl('button', {
+          type: 'button',
+          className: 'btn-adopt-idea',
+          textContent: '采用',
+          dataset: { idea: String(i) },
+          on_click: function() {
+            var selected = insp.usable_ideas[parseInt(this.dataset.idea)];
+            searchPanel.classList.add('hidden');
+            chatInput.value = '请参考这个方向来完善角色：' + selected;
+            sendMessage();
+          }
+        }));
+        list.appendChild(li);
       });
-    });
+      card.appendChild(list);
+    }
+
+    if (insp.cautions && insp.cautions.length > 0) {
+      card.appendChild(createEl('div', { className: 'insp-cautions', textContent: '注意: ' + insp.cautions.join('; ') }));
+    }
+
+    if (insp.sources && insp.sources.length > 0) {
+      var sources = createEl('div', { className: 'insp-sources' });
+      sources.appendChild(document.createTextNode('参考来源: '));
+      insp.sources.forEach(function(s) {
+        sources.appendChild(createEl('a', {
+          href: s.url,
+          target: '_blank',
+          rel: 'noopener noreferrer',
+          textContent: (s.title || s.url).slice(0, 30)
+        }));
+        sources.appendChild(document.createTextNode(' '));
+      });
+      card.appendChild(sources);
+    }
+
+    searchResult.appendChild(card);
   }
 
   async function loadSearchHistory() {
@@ -1549,7 +1792,16 @@
     };
   }
 
-  // Check auth on load
+  async function loadFeatureFlags() {
+    try {
+      var features = await apiCall('GET', '/api/features');
+      var voiceBtn = $('#btn-voice');
+      if (voiceBtn) voiceBtn.classList.toggle('hidden', !features.voice_enabled);
+    } catch (e) {
+      // Keep defaults if features endpoint fails.
+    }
+  }
+
   // Check auth on load
   var authChecked = false;
   (async function checkAuth() {
@@ -1558,6 +1810,7 @@
       updateUserDisplay(data.user);
       authChecked = true;
       authOverlay.classList.add('hidden');
+      await loadFeatureFlags();
       showDashboard();
     } catch (e) {
       updateUserDisplay(null);

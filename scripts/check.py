@@ -1,7 +1,11 @@
 # Mnemosyne Forge - Unified Check Command
 # Usage: py -m scripts.check
 # Or:    python scripts/check.py
+#
+# Environment variables:
+#   NODE_EXE - path to the Node.js executable (default: "node")
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,10 +27,15 @@ def run(cmd, label):
 
 def main():
     ok = True
-    ok &= run("node --check web/app.js", "JS Syntax")
+    node_exe = os.environ.get("NODE_EXE", "node")
+    ok &= run(f'{node_exe} --check web/app.js', "JS Syntax")
     ok &= run(f"{sys.executable} -m compileall app scripts", "Python Compile")
     ok &= run(f"{sys.executable} scripts/test_selected_assets_export.py", "Smoke Test")
     ok &= run(f"{sys.executable} scripts/test_voice_safety_and_performance.py", "Voice Safety")
+    ok &= run(f"{sys.executable} scripts/test_voice_sample_endpoint.py", "Voice Endpoint Guard")
+    ok &= run(f"{sys.executable} scripts/test_image_retry.py", "Image Retry")
+    ok &= run(f"{sys.executable} scripts/test_voice_unit_feedback.py", "Voice Unit Feedback")
+    ok &= run(f"{sys.executable} scripts/cleanup_orphan_exports.py --dry-run", "Export Cleanup")
     ok &= run(f"{sys.executable} scripts/index_legacy_exports.py", "Legacy Index")
     print(f"\n=== {'ALL OK' if ok else 'SOME FAILED'} ===")
     sys.exit(0 if ok else 1)

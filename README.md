@@ -29,7 +29,23 @@ ELEVENLABS_API_KEY=xxx       # 专属音色（可选）
 FISH_API_KEY=xxx             # Fish Audio（可选）
 ```
 
-`config.yaml` 中可切换 LLM provider、语音 provider、生图参数。
+`config.yaml` 中可切换 LLM provider、语音 provider、生图参数：
+
+- `voice.provider` 控制声音功能是否启用，可选 `elevenlabs` / `edge_tts` / `fish_audio` / `none`。
+- 旧的 `features.voice_enabled` 已移除，避免语义冲突。
+
+### 开发检查
+
+```powershell
+py -m scripts.check
+```
+
+如果 `node` 不在 PATH 中，可设置环境变量：
+
+```powershell
+$env:NODE_EXE = "C:\Program Files\nodejs\node.exe"
+py -m scripts.check
+```
 
 ## 功能
 
