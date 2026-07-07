@@ -31,7 +31,8 @@ FISH_API_KEY=xxx             # Fish Audio（可选）
 
 `config.yaml` 中可切换 LLM provider、语音 provider、生图参数：
 
-- `voice.provider` 控制声音功能是否启用，可选 `elevenlabs` / `edge_tts` / `fish_audio` / `none`。
+- **图像生成**：支持多模型自选。`image.provider` 为默认 provider，可选 `pollinations`（免费，无需 key） / `stability` / `openai` / `custom`。前端生图面板可切换模型；选择 `custom` 时可填写自己的 base_url、model、api_key。
+- **声音**：`voice.provider` 控制声音功能是否启用，可选 `elevenlabs` / `edge_tts` / `fish_audio` / `none`。
 - 旧的 `features.voice_enabled` 已移除，避免语义冲突。
 
 ### 开发检查
@@ -53,7 +54,7 @@ py -m scripts.check
 - **快速生成**：一键生成完整角色卡，跳过逐轮对话
 - **账号系统**：与忆界树共享用户数据库
 - **搜索增强**：DuckDuckGo 联网搜索，结果转为可采纳的创作方向
-- **图像生成**：Stability AI 三候选生图，Visual Identity Agent + Prompt Director + Image Critic
+- **图像生成**：多模型三候选生图（Pollinations 免费默认 / Stability / OpenAI / 自定义），Visual Identity Agent + Prompt Director + Image Critic
 - **专属音色**：ElevenLabs Voice Design 三候选，选择后锁定为角色专属 voice_id
 - **声音备选**：Edge TTS（免费自动匹配）、Fish Audio（需 reference_id）
 - **世界观生成**：LLM 生成世界观 + 世界书条目

@@ -1,19 +1,15 @@
-"""Image generation module — v0.7
+"""Image generation module.
 
-Generates character images using Stability AI (Stable Diffusion).
-Supports prompt building and actual image generation via Stability API.
+Generates character images via pluggable providers (Stability, OpenAI,
+Pollinations, custom). Supports prompt building and actual image generation.
 """
 
 from __future__ import annotations
 
-import base64
-from pathlib import Path
 from typing import Any
 
-import httpx
-
-from .config import get_config, get_project_root
-from .env_utils import read_env
+from .config import get_config
+from .image_providers import get_provider
 from .llm_client import chat
 from .oc_models import OCDraft
 
@@ -112,87 +108,37 @@ async def generate_character_image(
     style: str = "anime portrait",
     prompt: str | None = None,
     negative_prompt: str | None = None,
+    provider_name: str | None = None,
+    **provider_kwargs: Any,
 ) -> dict[str, Any]:
-    """Generate a character image using Stability AI.
+    """Generate a character image using the configured image provider.
 
-    Returns {ok, image_path, prompt, seed, error}
+    Returns {ok, image_path, prompt, negative_prompt, seed, error}
     """
     cfg = get_config()
     img_cfg = cfg.get("image", {})
-    api_key = read_env(img_cfg.get("api_key_env", ""))
-    style = _normalize_character_style(style)
+    provider_name = provider_name or img_cfg.get("provider", "pollinations")
 
-    if not api_key:
-        prompt = prompt or await build_image_prompt(draft, style)
-        return {"ok": False, "error": "Stability API Key 未配置，请设置 STABILITY_API_KEY 环境变量", "prompt": prompt}
-
-    # Build prompt
     if not draft.appearance:
         return {"ok": False, "error": "角色外貌信息不足，请先在草稿中补充外貌描述（发色、瞳色、服装、气质等）"}
+
     prompt = prompt or await build_image_prompt(draft, style)
     if not prompt:
         return {"ok": False, "error": "角色外貌信息不足，无法生成图片"}
 
     negative_prompt = negative_prompt or "low quality, blurry, ugly, deformed, bad anatomy, extra fingers, missing fingers, watermark, text, logo, signature"
 
-    # Call Stability AI
     try:
-        model = img_cfg.get("model", "sd3.5-large")
-        if str(model).startswith("sd3"):
-            url = "https://api.stability.ai/v2beta/stable-image/generate/sd3"
-        else:
-            url = "https://api.stability.ai/v2beta/stable-image/generate/core"
-
-        fields = {
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "output_format": "png",
-            "aspect_ratio": img_cfg.get("aspect_ratio", "1:1"),
-        }
-        if str(model).startswith("sd3"):
-            fields["model"] = model
-
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Accept": "application/json",
-                },
-                files={k: (None, v) for k, v in fields.items()},
-            )
-
-        if resp.status_code == 401 or resp.status_code == 403:
-            return {"ok": False, "error": f"Stability API auth/permission failed ({resp.status_code}): {resp.text[:300]}", "prompt": prompt}
-        if resp.status_code != 200:
-            return {"ok": False, "error": f"Stability API returned {resp.status_code}: {resp.text[:500]}", "prompt": prompt}
-
-        data = resp.json()
-        image_b64 = data.get("image", "")
-        if not image_b64:
-            return {"ok": False, "error": "API 未返回图片", "prompt": prompt}
-
-        # Save image
-        output_dir = get_project_root() / "exports" / "images"
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        image_data = base64.b64decode(image_b64)
-        seed = data.get("seed", 0)
-        filename = f"{draft.name or 'character'}_{seed}.png"
-        image_path = output_dir / filename
-        image_path.write_bytes(image_data)
-
-        return {
-            "ok": True,
-            "image_path": str(image_path),
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "seed": seed,
-            "finish_reason": data.get("finish_reason"),
-        }
-
+        provider = get_provider(provider_name)
+        return await provider.generate(
+            draft,
+            style,
+            prompt,
+            negative_prompt,
+            **provider_kwargs,
+        )
     except Exception as e:
-        return {"ok": False, "error": f"生图失败: {e}", "prompt": prompt}
+        return {"ok": False, "error": f"生图失败: {e}", "prompt": prompt, "negative_prompt": negative_prompt}
 
 
 def _normalize_character_style(style: str) -> str:

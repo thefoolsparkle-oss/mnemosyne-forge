@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from . import auth, db, oc_session
 from .config import get_app_config, get_config, get_project_root
+from .image_providers import list_providers as list_image_providers
 from .voice_safety import should_block_elevenlabs_auto_design
 
 app = FastAPI(title="Mnemosyne Forge", version="0.1.0")
@@ -90,6 +91,25 @@ async def features(user: dict[str, Any] = Depends(auth.current_user)):
         "voice_enabled": voice_provider not in ("", "none"),
         "voice_provider": voice_provider,
     }
+
+
+def _resolve_image_provider(body: dict) -> tuple[str, dict[str, Any]]:
+    """Resolve image provider name and per-request kwargs from request body.
+
+    Falls back to config.image.provider. For 'custom' provider, extracts
+    base_url, model, api_key from the request body.
+    """
+    cfg = get_config()
+    default = cfg.get("image", {}).get("provider", "pollinations")
+    name = (body.get("provider") or default).lower()
+    kwargs: dict[str, Any] = {}
+    if name == "custom":
+        kwargs["base_url"] = body.get("custom_base_url", "")
+        kwargs["model"] = body.get("custom_model", "")
+        kwargs["api_key"] = body.get("custom_api_key", "")
+        if body.get("custom_size"):
+            kwargs["size"] = body["custom_size"]
+    return name, kwargs
 
 
 @app.post("/api/admin/cleanup-exports")
@@ -485,6 +505,12 @@ async def image_prompt(session_id: str, style: str = "anime portrait", user: dic
     return {"ok": True, "prompt": prompt}
 
 
+@app.get("/api/image-providers")
+async def image_providers(user: dict[str, Any] = Depends(auth.current_user)):
+    """Return available image generation providers and their metadata."""
+    return {"ok": True, "providers": list_image_providers()}
+
+
 @app.post("/api/sessions/{session_id}/image")
 async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Depends(auth.current_user)):
     from .oc_image_gen import generate_character_image, build_image_prompt
@@ -495,17 +521,22 @@ async def generate_image(session_id: str, body: dict, user: dict[str, Any] = Dep
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
     style = body.get("style", "anime portrait")
+    provider_name, provider_kwargs = _resolve_image_provider(body)
     prompt = await build_image_prompt(draft, style)
     negative_prompt = "low quality, blurry, ugly, deformed, bad anatomy, extra fingers, missing fingers, watermark, text, logo, signature"
     audit = await audit_image_prompt(draft, prompt, negative_prompt)
-    result = await generate_character_image(draft, style, prompt=prompt, negative_prompt=negative_prompt)
+    result = await generate_character_image(
+        draft, style, prompt=prompt, negative_prompt=negative_prompt,
+        provider_name=provider_name, **provider_kwargs,
+    )
     result["audit"] = audit
+    result["provider"] = provider_name
     if result.get("ok") and result.get("image_path"):
         result["image_url"] = "/exports/images/" + Path(result["image_path"]).name
         result["asset_id"] = db.insert_asset(
             session_id,
             "image_candidate",
-            "stability",
+            provider_name,
             result["image_path"],
             {
                 "style": style,
@@ -537,6 +568,8 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    provider_name, provider_kwargs = _resolve_image_provider(body)
+
     # Use Visual Identity + Prompt Director for structured prompts
     retry_style = body.get("retry_style", "")
     retry_prompt = body.get("retry_prompt", "")
@@ -564,7 +597,10 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
     candidates = []
     for i, v in enumerate(variations[:3]):
         try:
-            result = await generate_character_image(draft, v.get("style", "anime"), prompt=v.get("positive_prompt", ""))
+            result = await generate_character_image(
+                draft, v.get("style", "anime"), prompt=v.get("positive_prompt", ""),
+                provider_name=provider_name, **provider_kwargs,
+            )
             critique = await critique_image_prompt(draft, v.get("positive_prompt", ""), v.get("negative_prompt", ""))
             result_critique = {"note": "result_image_critique_not_available"}
             if result.get("ok") and result.get("image_path"):
@@ -577,7 +613,7 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
             asset_id = None
             if result.get("ok") and result.get("image_path"):
                 image_url = "/exports/images/" + Path(result["image_path"]).name
-                asset_id = db.insert_asset(session_id, "image_candidate", "stability", result["image_path"],
+                asset_id = db.insert_asset(session_id, "image_candidate", provider_name, result["image_path"],
                     {"index": i, "style": v.get("style", ""), "prompt": v.get("positive_prompt", "")})
             candidates.append({
                 "index": i, "label": STYLE_LABEL_MAP.get(v.get("style", ""), f"候选 {i + 1}"),
@@ -591,10 +627,11 @@ async def image_candidates(session_id: str, body: dict, user: dict[str, Any] = D
                 "error": result.get("error", ""),
                 "critique": critique,
                 "result_critique": result_critique,
+                "provider": provider_name,
             })
         except Exception as e:
             candidates.append({"index": i, "label": v.get("style", ""), "ok": False, "error": str(e), "critique": None})
-    return {"ok": True, "candidates": candidates}
+    return {"ok": True, "provider": provider_name, "candidates": candidates}
 
 
 @app.post("/api/sessions/{session_id}/image-variations")
@@ -604,6 +641,8 @@ async def image_variations(session_id: str, body: dict | None = None, user: dict
     draft = await oc_session.get_session_draft(session_id)
     if draft is None:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    provider_name, provider_kwargs = _resolve_image_provider(body or {})
 
     locked = next(iter(db.list_assets(session_id, asset_type="image_locked", selected=True)), None)
     if locked is None:
@@ -636,6 +675,8 @@ async def image_variations(session_id: str, body: dict | None = None, user: dict
                 item.get("style") or locked_meta.get("selected_style") or "anime portrait",
                 prompt=prompt,
                 negative_prompt=negative_prompt,
+                provider_name=provider_name,
+                **provider_kwargs,
             )
             asset_id = None
             image_url = ""
@@ -644,7 +685,7 @@ async def image_variations(session_id: str, body: dict | None = None, user: dict
                 asset_id = db.insert_asset(
                     session_id,
                     "image_candidate",
-                    "stability",
+                    provider_name,
                     result["image_path"],
                     {
                         "index": i,
@@ -674,7 +715,7 @@ async def image_variations(session_id: str, body: dict | None = None, user: dict
         except Exception as e:
             candidates.append({"index": i, "label": label, "ok": False, "error": str(e), "parent_asset_id": locked.get("id")})
 
-    return {"ok": True, "parent_asset": locked, "candidates": candidates}
+    return {"ok": True, "provider": provider_name, "parent_asset": locked, "candidates": candidates}
 
 
 @app.post("/api/sessions/{session_id}/visual-canon-lock")

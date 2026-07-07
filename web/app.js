@@ -817,9 +817,11 @@
               try {
                 ensureImageOverlay();
                 imageOverlay.classList.remove('hidden');
+                if (imageProviders.length === 0) await loadImageProviders();
                 imageContent.innerHTML = '';
                 imageContent.appendChild(createEl('div', { className: 'image-loading', textContent: '正在基于已锁定立绘生成一致性变体…' }));
-                var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-variations', {});
+                var body = getImageProviderBody();
+                var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-variations', body);
                 renderImageCandidates(data.candidates || []);
                 await loadAssets();
               } catch(e) { showToast(e.message, 'error'); }
@@ -910,6 +912,57 @@
   var imageOverlay = null;
   var imageContent = null;
 
+  var imageProviders = [];
+
+  async function loadImageProviders() {
+    try {
+      var data = await apiCall('GET', '/api/image-providers');
+      imageProviders = data.providers || [];
+    } catch (e) {
+      imageProviders = [
+        { name: 'pollinations', label: 'Pollinations（免费默认）', requires_api_key: false },
+        { name: 'stability', label: 'Stability AI', requires_api_key: true },
+        { name: 'openai', label: 'OpenAI DALL-E', requires_api_key: true },
+        { name: 'custom', label: '其他（自定义）', requires_api_key: true },
+      ];
+    }
+  }
+
+  function renderImageProviderSelect(container) {
+    var existing = container.querySelector('.image-provider-select');
+    if (existing) return existing;
+    var wrap = createEl('div', { className: 'image-provider-select', style: 'margin-right:8px' });
+    var select = createEl('select', { id: 'image-provider-select', className: 'voice-select' });
+    imageProviders.forEach(function(p) {
+      select.appendChild(createEl('option', { value: p.name, textContent: p.label }));
+    });
+    wrap.appendChild(select);
+
+    var customWrap = createEl('div', { className: 'image-provider-custom hidden', style: 'margin-top:6px' });
+    customWrap.appendChild(createEl('input', { type: 'text', id: 'image-custom-base-url', className: 'voice-edit-input', placeholder: 'API base_url', style: 'width:100%;margin-bottom:4px' }));
+    customWrap.appendChild(createEl('input', { type: 'text', id: 'image-custom-model', className: 'voice-edit-input', placeholder: '模型名', style: 'width:100%;margin-bottom:4px' }));
+    customWrap.appendChild(createEl('input', { type: 'password', id: 'image-custom-api-key', className: 'voice-edit-input', placeholder: 'API Key', style: 'width:100%' }));
+    wrap.appendChild(customWrap);
+
+    select.addEventListener('change', function() {
+      customWrap.classList.toggle('hidden', this.value !== 'custom');
+    });
+    container.appendChild(wrap);
+    return select;
+  }
+
+  function getImageProviderBody() {
+    var providerEl = document.getElementById('image-provider-select');
+    var provider = providerEl ? providerEl.value : 'pollinations';
+    var body = { provider: provider };
+    if (provider === 'custom') {
+      body.custom_base_url = (document.getElementById('image-custom-base-url') || {}).value || '';
+      body.custom_model = (document.getElementById('image-custom-model') || {}).value || '';
+      body.custom_api_key = (document.getElementById('image-custom-api-key') || {}).value || '';
+    }
+    return body;
+  }
+
   function ensureImageOverlay() {
     if (imageOverlay) return;
     imageOverlay = document.createElement('div');
@@ -918,12 +971,15 @@
       '<div class="image-panel">' +
         '<div class="image-panel-header">' +
           '<h3>立绘候选</h3>' +
+          '<div class="image-panel-actions" id="image-panel-actions"></div>' +
           '<button type="button" class="btn-close-card" id="btn-image-close">&times;</button>' +
         '</div>' +
         '<div id="image-content" class="image-content"></div>' +
       '</div>';
     document.body.appendChild(imageOverlay);
     imageContent = imageOverlay.querySelector('#image-content');
+    var actions = imageOverlay.querySelector('#image-panel-actions');
+    renderImageProviderSelect(actions);
     imageOverlay.querySelector('#btn-image-close').addEventListener('click', function() {
       imageOverlay.classList.add('hidden');
     });
@@ -972,7 +1028,8 @@
             var negPrompt = this.dataset.negPrompt || '';
             showToast('正在重试「' + style + '」风格……', 'success');
             try {
-              var retryBody = { retry_style: style };
+              var retryBody = getImageProviderBody();
+              retryBody.retry_style = style;
               if (prompt) { retryBody.retry_prompt = prompt; retryBody.retry_negative_prompt = negPrompt; }
               var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', retryBody);
               renderImageCandidates(data.candidates || []);
@@ -1027,12 +1084,16 @@
     if (!state.sessionId) return;
     ensureImageOverlay();
     imageOverlay.classList.remove('hidden');
-    imageContent.innerHTML = '<div class="image-loading">正在生成三张候选立绘…</div>';
+    if (imageProviders.length === 0) await loadImageProviders();
+    imageContent.innerHTML = '';
+    imageContent.appendChild(createEl('div', { className: 'image-loading', textContent: '正在生成三张候选立绘…' }));
     try {
-      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', {});
+      var body = getImageProviderBody();
+      var data = await apiCall('POST', '/api/sessions/' + state.sessionId + '/image-candidates', body);
       renderImageCandidates(data.candidates || []);
     } catch(e) {
-      imageContent.innerHTML = '<div class="image-error">' + escapeHtml(e.message) + '</div>';
+      imageContent.innerHTML = '';
+      imageContent.appendChild(createEl('div', { className: 'image-error', textContent: e.message }));
     }
   });
 

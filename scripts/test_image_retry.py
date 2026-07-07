@@ -79,7 +79,7 @@ def _create_session() -> str:
 def _mock_generate_character_image():
     call_count = {"n": 0}
 
-    async def _fake_generate(draft, style, prompt=None, negative_prompt=None):
+    async def _fake_generate(draft, style, prompt=None, negative_prompt=None, provider_name=None, **kwargs):
         call_count["n"] += 1
         return {
             "ok": True,
