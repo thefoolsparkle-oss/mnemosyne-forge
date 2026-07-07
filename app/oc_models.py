@@ -101,7 +101,7 @@ class SearchResult(BaseModel):
     title: str
     url: str
     snippet: str
-    source: str = "duckduckgo"
+    source: str = ""
     query: str
     score: float = 0.0
 

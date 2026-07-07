@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from . import auth, db, oc_session
 from .config import get_app_config, get_config, get_project_root
 from .image_providers import list_providers as list_image_providers
+from .search_providers import list_providers as list_search_providers
 from .voice_safety import should_block_elevenlabs_auto_design
 
 app = FastAPI(title="Mnemosyne Forge", version="0.1.0")
@@ -382,6 +383,12 @@ async def search_runs(session_id: str, user: dict[str, Any] = Depends(auth.curre
     _require_session_access(session_id, user)
     runs = db.get_search_runs(session_id)
     return {"ok": True, "runs": runs}
+
+
+@app.get("/api/search-providers")
+async def search_providers(user: dict[str, Any] = Depends(auth.current_user)):
+    """Return all registered search providers and their availability."""
+    return {"ok": True, "providers": list_search_providers()}
 
 
 # ─── World generation ──────────────────────────────────

@@ -35,7 +35,9 @@ def main():
     ok &= run(f"{sys.executable} scripts/test_voice_sample_endpoint.py", "Voice Endpoint Guard")
     ok &= run(f"{sys.executable} scripts/test_image_retry.py", "Image Retry")
     ok &= run(f"{sys.executable} scripts/test_image_providers.py", "Image Providers")
+    ok &= run(f"{sys.executable} scripts/test_search_providers.py", "Search Providers")
     ok &= run(f"{sys.executable} scripts/test_voice_unit_feedback.py", "Voice Unit Feedback")
+
     ok &= run(f"{sys.executable} scripts/cleanup_orphan_exports.py --dry-run", "Export Cleanup")
     ok &= run(f"{sys.executable} scripts/index_legacy_exports.py", "Legacy Index")
     print(f"\n=== {'ALL OK' if ok else 'SOME FAILED'} ===")

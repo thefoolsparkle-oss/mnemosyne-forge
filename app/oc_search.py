@@ -22,6 +22,7 @@ from .oc_models import (
     SearchResponse,
     SearchResult,
 )
+from .search_providers import list_providers, resolve_provider
 
 # ─── Keywords for fast trigger check ──────────────────
 
@@ -175,47 +176,20 @@ def _fallback_queries(text: str) -> list[str]:
 # ─── Web search ────────────────────────────────────────
 
 def _is_search_available() -> bool:
-    try:
-        import ddgs  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
-def _ddg_search_sync(query: str, max_results: int) -> list[SearchResult]:
-    try:
-        from ddgs import DDGS
-        with DDGS() as ddgs:
-            results = []
-            for r in ddgs.text(query, max_results=max_results):
-                title = r.get("title", "").strip()
-                snippet = r.get("body", "").strip()
-                url = r.get("href", "").strip()
-                if title or snippet:
-                    results.append(SearchResult(
-                        title=title or "(no title)",
-                        url=url,
-                        snippet=snippet,
-                        query=query,
-                    ))
-            return results
-    except Exception:
-        return []
+    """Return True if at least one search provider is available."""
+    return any(p["available"] for p in list_providers())
 
 
 async def search_web(queries: list[str]) -> list[SearchResult]:
-    """Execute DuckDuckGo searches for each query."""
-    if not _is_search_available():
-        return []
-
-    import asyncio as _asyncio
+    """Execute searches for each query using the best available provider."""
     cfg = get_config()
     sc = cfg.get("search", {})
+    provider = resolve_provider(sc)
     rpq = sc.get("results_per_query", 3)
 
     all_results: list[SearchResult] = []
     for q in queries[: sc.get("max_queries", 3)]:
-        batch = await _asyncio.to_thread(_ddg_search_sync, q, rpq)
+        batch = await provider.search(q, max_results=rpq)
         all_results.extend(batch)
     return all_results
 
@@ -317,7 +291,7 @@ async def search_and_inspire(
         return SearchResponse(ok=False, error="搜索内容不能为空")
 
     if not _is_search_available():
-        return SearchResponse(ok=False, error="搜索服务不可用。请安装 ddgs: pip install ddgs")
+        return SearchResponse(ok=False, error="没有可用的搜索后端。请配置 SERPER_API_KEY / TAVILY_API_KEY / SearXNG，或安装 ddgs: pip install ddgs")
 
     # 1. Build queries
     queries = await build_queries(user_message, draft)
