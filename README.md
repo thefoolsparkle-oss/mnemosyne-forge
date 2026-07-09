@@ -27,17 +27,37 @@ DEEPSEEK_API_KEY=sk-xxx      # LLM（必填）
 STABILITY_API_KEY=sk-xxx     # 生图（可选）
 ELEVENLABS_API_KEY=xxx       # 专属音色（可选）
 FISH_API_KEY=xxx             # Fish Audio（可选）
+SERPER_API_KEY=xxx           # 联网搜索（推荐，稳定）
+TAVILY_API_KEY=xxx           # 联网搜索（备选）
 ```
 
-`config.yaml` 中可切换 LLM provider、语音 provider、生图参数。
+`config.yaml` 中可切换 LLM provider、语音 provider、生图参数：
+
+- **联网搜索**：`search.provider` 默认 `auto`，按以下优先级自动选择：`serper`（需 `SERPER_API_KEY`）→ `tavily`（需 `TAVILY_API_KEY`）→ `searxng`（需自建实例）→ `duckduckgo`（免费，易挂）→ `bing_scraper`（最后兜底，不稳定）。搜索结果只作为当前请求素材，不写入角色卡/世界书。
+- **图像生成**：支持多模型自选。`image.provider` 为默认 provider，可选 `pollinations`（免费，无需 key） / `stability` / `openai` / `seedream` / `custom`。前端生图面板可切换模型；选择 `custom` 时可填写自己的 base_url、model、api_key。
+- **声音**：`voice.provider` 控制声音功能是否启用，可选 `elevenlabs` / `edge_tts` / `fish_audio` / `none`。
+- 旧的 `features.voice_enabled` 已移除，避免语义冲突。
+
+### 开发检查
+
+```powershell
+py -m scripts.check
+```
+
+如果 `node` 不在 PATH 中，可设置环境变量：
+
+```powershell
+$env:NODE_EXE = "C:\Program Files\nodejs\node.exe"
+py -m scripts.check
+```
 
 ## 功能
 
 - **多 Agent 协作**：Guide / Designer / Consistency / Export
 - **快速生成**：一键生成完整角色卡，跳过逐轮对话
 - **账号系统**：与忆界树共享用户数据库
-- **搜索增强**：DuckDuckGo 联网搜索，结果转为可采纳的创作方向
-- **图像生成**：Stability AI 三候选生图，Visual Identity Agent + Prompt Director + Image Critic
+- **搜索增强**：多后端联网搜索（Serper / Tavily / SearXNG / DuckDuckGo / Bing 爬虫兜底），按可用性自动选择，结果仅作为临时创作素材
+- **图像生成**：多模型三候选生图（Pollinations 免费默认 / Stability / OpenAI / 自定义），Visual Identity Agent + Prompt Director + Image Critic
 - **专属音色**：ElevenLabs Voice Design 三候选，选择后锁定为角色专属 voice_id
 - **声音备选**：Edge TTS（免费自动匹配）、Fish Audio（需 reference_id）
 - **世界观生成**：LLM 生成世界观 + 世界书条目
